@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <title>专属放映室 (桌面版)</title>
+  <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+  <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  
   <style>
     :root {
       --bili-pink: #fb7299; --bili-pink-hover: #ff85a8;
@@ -13,8 +16,57 @@
     body, html { 
       margin: 0; padding: 0; height: 100%; overflow: hidden; 
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #000; color: var(--text-main);
+      background: #000; color: var(--text-main); user-select: none;
     }
+
+    /* ==========================================
+       🎮 PSV 风格主菜单视图
+       ========================================== */
+    #main-menu {
+      position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: #0a0a1a; display: flex; flex-direction: column; 
+      justify-content: center; align-items: center; z-index: 20000; transition: opacity 0.5s ease;
+    }
+    /* 呼吸波纹动画 */
+    @keyframes breath {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+    .bg-wave1 {
+      position: absolute; width: 800px; height: 800px; border-radius: 50%;
+      background: rgba(0, 150, 255, 0.15); top: -200px; left: -200px;
+      animation: breath 8s infinite ease-in-out; pointer-events: none;
+    }
+    .bg-wave2 {
+      position: absolute; width: 600px; height: 600px; border-radius: 50%;
+      background: rgba(150, 0, 255, 0.1); bottom: -150px; right: -150px;
+      animation: breath 8s infinite ease-in-out reverse; pointer-events: none;
+    }
+    .menu-header {
+      position: absolute; top: 30px; width: calc(100% - 60px); 
+      display: flex; justify-content: space-between; align-items: center; z-index: 10;
+    }
+    .menu-time { font-size: 18px; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
+    .menu-icons { display: flex; gap: 10px; font-size: 20px; }
+    
+    .bubble-grid {
+      display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; z-index: 10; width: 80%;
+    }
+    .bubble-container {
+      display: flex; flex-direction: column; align-items: center; cursor: pointer;
+      transition: transform 0.2s; width: 100px;
+    }
+    .bubble-container:hover { transform: scale(1.1); }
+    .bubble {
+      width: 86px; height: 86px; border-radius: 43px; display: flex; justify-content: center; align-items: center;
+      border: 1.5px solid rgba(255,255,255,0.4); box-shadow: 0 5px 15px rgba(0,0,0,0.5); font-size: 42px; color: white;
+    }
+    .bubble-text { margin-top: 12px; font-size: 14px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+
+    /* ==========================================
+       🎬 放映室视图配置
+       ========================================== */
+    #watch-party-app { display: none; width: 100vw; height: 100vh; position: relative; }
     
     webview { 
       position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; 
@@ -24,10 +76,16 @@
     .webview-active { opacity: 1; pointer-events: auto; z-index: 1; }
     
     #setup-dialog { 
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
+      position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; 
       display: flex; flex-direction: column; justify-content: center; align-items: center; 
       z-index: 10000; background: #111; transition: opacity 0.5s ease;
     }
+    .back-btn {
+      position: absolute; top: 30px; left: 30px; font-size: 32px; color: white; cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .back-btn:hover { transform: scale(1.1); }
+
     .setup-card {
       background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border);
       border-radius: 24px; padding: 40px 50px; text-align: center;
@@ -39,37 +97,31 @@
     }
     .setup-card button { 
       width: 100%; padding: 14px; border-radius: 12px; border: none; background: var(--bili-pink); 
-      color: white; cursor: pointer; font-weight: 600;
+      color: white; cursor: pointer; font-weight: 600; font-size: 16px;
     }
 
     #ui { 
       position: fixed; top: 25px; left: 25px; background: var(--glass-bg); backdrop-filter: blur(15px);
       border: 1px solid var(--glass-border); padding: 10px 20px; border-radius: 30px; 
-      z-index: 9999; font-size: 14px; pointer-events: none; opacity: 0;
-      display: flex; align-items: center; gap: 8px; transition: opacity 0.5s;
+      z-index: 9999; font-size: 14px; opacity: 0; transition: opacity 0.5s;
+      display: flex; align-items: center; gap: 8px; cursor: pointer;
     }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffcc00; }
 
-    /* ⚠️ 新增：全屏弹幕轨道层 */
     #danmaku-container {
       position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
-      pointer-events: none; /* 必须设置穿透，否则无法点击视频 */
-      overflow: hidden; z-index: 8000;
+      pointer-events: none; overflow: hidden; z-index: 8000;
     }
-    
-    /* ⚠️ 新增：单条弹幕的样式与硬件加速动画 */
     .danmaku-item {
       position: absolute; white-space: nowrap; color: #fff; font-size: 24px; font-weight: bold;
       text-shadow: 1px 1px 3px rgba(0,0,0,0.8), -1px -1px 3px rgba(0,0,0,0.8);
-      will-change: transform; /* 开启 GPU 硬件加速 */
-      animation: danmakuSlide 6s linear forwards;
+      will-change: transform; animation: danmakuSlide 6s linear forwards;
     }
     @keyframes danmakuSlide {
       from { transform: translateX(100vw); }
       to { transform: translateX(-100%); }
     }
 
-    /* ⚠️ 新增：PC 端底部的弹幕发送栏 */
     #chat-bar {
       position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
       background: var(--glass-bg); backdrop-filter: blur(15px); border: 1px solid var(--glass-border);
@@ -86,27 +138,75 @@
   </style>
 </head>
 <body>
-  
-  <div id="setup-dialog">
-    <div class="setup-card">
-      <h2>专属放映室</h2>
-      <input type="text" id="ip-input" placeholder="请输入信令服务器 IP">
-      <button onclick="saveAndConnect()">建立连接</button>
+
+  <div id="main-menu">
+    <div class="bg-wave1"></div>
+    <div class="bg-wave2"></div>
+    
+    <div class="menu-header">
+      <div class="menu-time" id="clock">10:04 AM</div>
+      <div class="menu-icons">
+        <ion-icon name="wifi"></ion-icon>
+        <ion-icon name="battery-full"></ion-icon>
+      </div>
+    </div>
+
+    <div class="bubble-grid">
+      <div class="bubble-container" onclick="openApp('watch-party')">
+        <div class="bubble" style="background-color: rgba(251, 114, 153, 0.7);"><ion-icon name="videocam"></ion-icon></div>
+        <div class="bubble-text">专属放映室</div>
+      </div>
+      <div class="bubble-container" onclick="alert('开源游戏库构建中...')">
+        <div class="bubble" style="background-color: rgba(0, 200, 255, 0.7);"><ion-icon name="game-controller"></ion-icon></div>
+        <div class="bubble-text">开源游戏库</div>
+      </div>
+      <div class="bubble-container" onclick="alert('JoJo 宇宙图鉴整理中...')">
+        <div class="bubble" style="background-color: rgba(150, 50, 255, 0.7);"><ion-icon name="book"></ion-icon></div>
+        <div class="bubble-text">JoJo 设定集</div>
+      </div>
+      <div class="bubble-container" onclick="alert('系统控制台未挂载')">
+        <div class="bubble" style="background-color: rgba(100, 100, 100, 0.7);"><ion-icon name="settings"></ion-icon></div>
+        <div class="bubble-text">系统设定</div>
+      </div>
     </div>
   </div>
 
-  <div id="ui"><div id="status-dot" class="status-dot"></div><span id="status">正在准备连接...</span></div>
-  
-  <div id="danmaku-container"></div>
-  
-  <div id="chat-bar">
-    <input type="text" id="chat-input" placeholder="发个弹幕吐槽一下..." onkeydown="if(event.key==='Enter') sendChat()">
-    <button onclick="sendChat()">发送</button>
+  <div id="watch-party-app">
+    <div id="setup-dialog">
+      <ion-icon name="arrow-back-circle" class="back-btn" onclick="returnToMenu()"></ion-icon>
+      <div class="setup-card">
+        <h2>专属放映室</h2>
+        <input type="text" id="ip-input" placeholder="请输入信令服务器 IP">
+        <button onclick="saveAndConnect()">建立连接</button>
+      </div>
+    </div>
+
+    <div id="ui" onclick="returnToMenu()"><ion-icon name="close-circle" style="font-size:18px; margin-right:4px;"></ion-icon><div id="status-dot" class="status-dot"></div><span id="status">正在准备连接...</span></div>
+    
+    <div id="danmaku-container"></div>
+    
+    <div id="chat-bar">
+      <input type="text" id="chat-input" placeholder="发个弹幕吐槽一下..." onkeydown="if(event.key==='Enter') sendChat()">
+      <button onclick="sendChat()">发送</button>
+    </div>
+    
+    <webview id="bili"></webview>
   </div>
-  
-  <webview id="bili" src="https://player.bilibili.com/player.html?bvid=BV1LSXDBiEGG&high_quality=1&isOutside=true"></webview>
 
   <script>
+    // --- 时钟更新 ---
+    setInterval(() => {
+      const now = new Date();
+      let hours = now.getHours();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      document.getElementById('clock').innerText = `${hours}:${minutes} ${ampm}`;
+    }, 1000);
+
+    // --- DOM 节点 ---
+    const mainMenu = document.getElementById('main-menu');
+    const wpApp = document.getElementById('watch-party-app');
     const setupDialog = document.getElementById('setup-dialog');
     const uiEl = document.getElementById('ui');
     const chatBar = document.getElementById('chat-bar');
@@ -118,7 +218,43 @@
 
     function updateStatus(text, color) { statusEl.innerText = text; statusDot.style.background = color; }
 
-    window.onload = () => { if (localStorage.getItem('watchPartyServerIp')) ipInput.value = localStorage.getItem('watchPartyServerIp'); };
+    window.onload = () => { 
+      if (localStorage.getItem('watchPartyServerIp')) ipInput.value = localStorage.getItem('watchPartyServerIp'); 
+    };
+
+    // --- 路由切换逻辑 ---
+    function openApp(appId) {
+      if (appId === 'watch-party') {
+        mainMenu.style.opacity = '0';
+        setTimeout(() => {
+          mainMenu.style.display = 'none';
+          wpApp.style.display = 'block';
+          setupDialog.style.display = 'flex';
+          setupDialog.style.opacity = '1';
+        }, 500);
+      }
+    }
+
+    function returnToMenu() {
+      if (socket) { socket.disconnect(); socket = null; }
+      biliWebview.classList.remove('webview-active');
+      biliWebview.src = 'about:blank'; // 释放内存
+      uiEl.style.opacity = '0';
+      chatBar.classList.remove('active');
+      
+      wpApp.style.display = 'none';
+      mainMenu.style.display = 'flex';
+      setTimeout(() => mainMenu.style.opacity = '1', 50);
+    }
+
+    // --- 放映室业务逻辑 ---
+    let pcUiVisible = true;
+    function togglePCUI() {
+      pcUiVisible = !pcUiVisible;
+      uiEl.style.opacity = pcUiVisible ? '1' : '0';
+      chatBar.style.opacity = pcUiVisible ? '1' : '0';
+      chatBar.style.pointerEvents = pcUiVisible ? 'auto' : 'none'; 
+    }
 
     function saveAndConnect() {
       let ip = ipInput.value.trim();
@@ -131,24 +267,22 @@
         setupDialog.style.display = 'none';
         uiEl.style.opacity = '1'; chatBar.classList.add('active');
         biliWebview.classList.add('webview-active');
+        // 挂载资源
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=BV1LSXDBiEGG&high_quality=1&isOutside=true`;
         initNetwork(ip);
       }, 500); 
     }
 
-    // ⚠️ 新增：生成弹幕并挂载到屏幕，动画结束后自动销毁防内存泄漏
     function shootDanmaku(text) {
       const container = document.getElementById('danmaku-container');
       const el = document.createElement('div');
       el.className = 'danmaku-item';
       el.innerText = text;
-      // 随机分布在屏幕顶部 10% 到 70% 的高度范围内
       el.style.top = Math.random() * 60 + 10 + '%'; 
       container.appendChild(el);
-      // 6秒动画结束后销毁 DOM 节点
       setTimeout(() => el.remove(), 6000);
     }
 
-    // ⚠️ 新增：发送弹幕请求
     function sendChat() {
       const input = document.getElementById('chat-input');
       const text = input.value.trim();
@@ -158,37 +292,20 @@
       }
     }
 
-    // ⚠️ 新增：PC 端 UI 显示状态寄存器
-    let pcUiVisible = true;
-    function togglePCUI() {
-      pcUiVisible = !pcUiVisible;
-      uiEl.style.opacity = pcUiVisible ? '1' : '0';
-      chatBar.style.opacity = pcUiVisible ? '1' : '0';
-      // 隐藏时彻底禁用输入框的鼠标检测，防止幽灵点击
-      chatBar.style.pointerEvents = pcUiVisible ? 'auto' : 'none'; 
-    }
-
     function initNetwork(serverUrl) {
       socket = io(serverUrl, { transports: ['websocket'] });
       
-      socket.on('connect', () => { 
-        updateStatus('已连接放映室', '#00e676');
-        // 废弃原先的定时自动消失逻辑，改为严格受用户点击控制
-      });
-
-      // ⚠️ 新增：监听 B 站 Webview 内部传出的伪装信令
+      socket.on('connect', () => { updateStatus('已连接放映室', '#00e676'); });
+      
       biliWebview.addEventListener('console-message', (e) => {
-        if (e.message === 'TOGGLE_UI_PC') {
-          togglePCUI();
-        } else if (e.message.startsWith('【探针')) {
-          console.log(e.message);
-        }
+        if (e.message === 'TOGGLE_UI_PC') { togglePCUI(); } 
+        else if (e.message.startsWith('【探针')) { console.log(e.message); }
       });
 
       let isRemoteSyncing = false;
       let lastTime = 0; let lastState = 'paused';
 
-      socket.on('receive_danmaku', (data) => { shootDanmaku(data.text); });
+      socket.on('receive_danmaku', (data) => shootDanmaku(data.text));
 
       socket.on('change_video', (data) => {
         updateStatus('正在换片...', '#00aeec');
@@ -212,21 +329,16 @@
       });
 
       setInterval(() => {
-        if (isRemoteSyncing) return; 
+        if (!socket || isRemoteSyncing) return; 
         
-        // ⚠️ 新增：在定时器中持续尝试向 B 站注入交互拦截防线（自带执行锁防止重复注入）
         biliWebview.executeJavaScript(`
           (function() {
             if (window.__interaction_injected) return;
             window.__interaction_injected = true;
-            
-            var tapTimer = null;
-            var lastTap = 0;
+            var tapTimer = null; var lastTap = 0;
             window.addEventListener('click', function(e) {
-              if (e.clientY > window.innerHeight - 90) return; // 避开 B 站底部控制栏
-              
-              e.stopPropagation(); // 切断 B 站原生暂停逻辑
-              
+              if (e.clientY > window.innerHeight - 90) return; 
+              e.stopPropagation(); 
               var now = Date.now();
               if (now - lastTap < 300) {
                  clearTimeout(tapTimer);
