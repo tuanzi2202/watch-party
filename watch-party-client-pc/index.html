@@ -27,7 +27,6 @@
       background: #0a0a1a; display: flex; flex-direction: column; 
       justify-content: center; align-items: center; z-index: 20000; transition: opacity 0.5s ease;
     }
-    /* 呼吸波纹动画 */
     @keyframes breath {
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.08); }
@@ -100,13 +99,14 @@
       color: white; cursor: pointer; font-weight: 600; font-size: 16px;
     }
 
+    /* 顶部控制面板 */
     #ui { 
       position: fixed; top: 25px; left: 25px; background: var(--glass-bg); backdrop-filter: blur(15px);
       border: 1px solid var(--glass-border); padding: 10px 20px; border-radius: 30px; 
       z-index: 9999; font-size: 14px; opacity: 0; transition: opacity 0.5s;
-      display: flex; align-items: center; gap: 8px; cursor: pointer;
+      display: flex; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
     }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffcc00; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffcc00; margin-right: 6px; }
 
     #danmaku-container {
       position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -152,9 +152,13 @@
     </div>
 
     <div class="bubble-grid">
-      <div class="bubble-container" onclick="openApp('watch-party')">
+      <div class="bubble-container" onclick="openApp('watch-party', false)">
         <div class="bubble" style="background-color: rgba(251, 114, 153, 0.7);"><ion-icon name="videocam"></ion-icon></div>
         <div class="bubble-text">专属放映室</div>
+      </div>
+      <div class="bubble-container" onclick="openApp('watch-party', true)">
+        <div class="bubble" style="background-color: rgba(255, 165, 0, 0.7);"><ion-icon name="shuffle"></ion-icon></div>
+        <div class="bubble-text">随机盲盒</div>
       </div>
       <div class="bubble-container" onclick="alert('开源游戏库构建中...')">
         <div class="bubble" style="background-color: rgba(0, 200, 255, 0.7);"><ion-icon name="game-controller"></ion-icon></div>
@@ -164,10 +168,6 @@
         <div class="bubble" style="background-color: rgba(150, 50, 255, 0.7);"><ion-icon name="book"></ion-icon></div>
         <div class="bubble-text">JoJo 设定集</div>
       </div>
-      <div class="bubble-container" onclick="alert('系统控制台未挂载')">
-        <div class="bubble" style="background-color: rgba(100, 100, 100, 0.7);"><ion-icon name="settings"></ion-icon></div>
-        <div class="bubble-text">系统设定</div>
-      </div>
     </div>
   </div>
 
@@ -175,13 +175,20 @@
     <div id="setup-dialog">
       <ion-icon name="arrow-back-circle" class="back-btn" onclick="returnToMenu()"></ion-icon>
       <div class="setup-card">
-        <h2>专属放映室</h2>
+        <h2 id="setup-title">专属放映室</h2>
         <input type="text" id="ip-input" placeholder="请输入信令服务器 IP">
         <button onclick="saveAndConnect()">建立连接</button>
       </div>
     </div>
 
-    <div id="ui" onclick="returnToMenu()"><ion-icon name="close-circle" style="font-size:18px; margin-right:4px;"></ion-icon><div id="status-dot" class="status-dot"></div><span id="status">正在准备连接...</span></div>
+    <div id="ui">
+      <ion-icon name="close-circle" style="font-size:24px; margin-right:8px; cursor:pointer;" onclick="returnToMenu()"></ion-icon>
+      <div id="status-dot" class="status-dot"></div>
+      <span id="status" style="margin-right: 15px;">正在准备连接...</span>
+      <input type="text" id="pc-bvid-input" placeholder="输入BV号换片" style="background:rgba(255,255,255,0.2); border:none; color:#fff; border-radius:12px; padding:6px 12px; outline:none; width: 130px;">
+      <button onclick="changeVideoPC()" style="background:#fb7299; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 12px; margin-left:8px; font-weight:bold;">换片</button>
+      <button onclick="playRandomPC()" style="background:#ff9800; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 10px; margin-left:8px; display:flex; align-items:center; justify-content:center;"><ion-icon name="dice" style="font-size:18px;"></ion-icon></button>
+    </div>
     
     <div id="danmaku-container"></div>
     
@@ -214,7 +221,15 @@
     const ipInput = document.getElementById('ip-input');
     const statusEl = document.getElementById('status');
     const statusDot = document.getElementById('status-dot');
+    const setupTitle = document.getElementById('setup-title');
     let socket;
+
+    // --- 随机盲盒数据池 ---
+    const RANDOM_POOL = [
+      'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
+      'BV1qM4y1w716', 'BV1aA4y1I7vL', 'BV1Q54y1y7eA'
+    ];
+    let isAutoRandom = false;
 
     function updateStatus(text, color) { statusEl.innerText = text; statusDot.style.background = color; }
 
@@ -223,8 +238,10 @@
     };
 
     // --- 路由切换逻辑 ---
-    function openApp(appId) {
+    function openApp(appId, randomFlag) {
       if (appId === 'watch-party') {
+        isAutoRandom = randomFlag;
+        setupTitle.innerText = randomFlag ? '准备开启盲盒' : '专属放映室';
         mainMenu.style.opacity = '0';
         setTimeout(() => {
           mainMenu.style.display = 'none';
@@ -238,7 +255,7 @@
     function returnToMenu() {
       if (socket) { socket.disconnect(); socket = null; }
       biliWebview.classList.remove('webview-active');
-      biliWebview.src = 'about:blank'; // 释放内存
+      biliWebview.src = 'about:blank'; // 释放底层内存
       uiEl.style.opacity = '0';
       chatBar.classList.remove('active');
       
@@ -252,6 +269,7 @@
     function togglePCUI() {
       pcUiVisible = !pcUiVisible;
       uiEl.style.opacity = pcUiVisible ? '1' : '0';
+      uiEl.style.pointerEvents = pcUiVisible ? 'auto' : 'none'; 
       chatBar.style.opacity = pcUiVisible ? '1' : '0';
       chatBar.style.pointerEvents = pcUiVisible ? 'auto' : 'none'; 
     }
@@ -265,12 +283,34 @@
       setupDialog.style.opacity = '0'; setupDialog.style.pointerEvents = 'none';
       setTimeout(() => {
         setupDialog.style.display = 'none';
-        uiEl.style.opacity = '1'; chatBar.classList.add('active');
+        uiEl.style.opacity = '1'; uiEl.style.pointerEvents = 'auto';
+        chatBar.classList.add('active');
         biliWebview.classList.add('webview-active');
-        // 挂载资源
-        biliWebview.src = `https://player.bilibili.com/player.html?bvid=BV1LSXDBiEGG&high_quality=1&isOutside=true`;
+        
+        // 挂载初始资源
+        const targetBvid = isAutoRandom ? RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)] : 'BV1LSXDBiEGG';
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true`;
+        
         initNetwork(ip);
+        
+        // 盲盒模式下延迟全网广播
+        if (isAutoRandom && socket) {
+          setTimeout(() => socket.emit('change_video', { bvid: targetBvid }), 2000);
+        }
       }, 500); 
+    }
+
+    function changeVideoPC() {
+      const bvid = document.getElementById('pc-bvid-input').value.trim();
+      if (bvid && socket) {
+        socket.emit('change_video', { bvid: bvid });
+        document.getElementById('pc-bvid-input').value = '';
+      }
+    }
+
+    function playRandomPC() {
+      const randomId = RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)];
+      if (socket) socket.emit('change_video', { bvid: randomId });
     }
 
     function shootDanmaku(text) {

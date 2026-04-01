@@ -9,7 +9,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width } = Dimensions.get('window');
+// ⚠️ 新增：静态盲盒数据池 (可自行扩充高质量 BVID)
+const RANDOM_BVID_POOL = [
+  'BV1LSXDBiEGG', // 默认高画质风景
+  'BV1GJ411x7h7', // 经典爆款
+  'BV1xx411c7mD', // 热门动画
+  'BV17x411w7KC', // 知识科普
+  'BV1qM4y1w716', // 音乐 MV
+  'BV1aA4y1I7vL', // 鬼畜经典
+  'BV1Q54y1y7eA'  // 游戏混剪
+];
 
 const formatTime = (seconds) => {
   if (isNaN(seconds) || seconds < 0) return '00:00';
@@ -22,7 +31,6 @@ const formatTime = (seconds) => {
 // 🎮 视界 1: PSV 风格主菜单组件
 // ==========================================
 const PSVMenuScreen = ({ onNavigate }) => {
-  // 呼吸动画模拟 PSV 的动态流体背景
   const breathAnim = useRef(new Animated.Value(1)).current;
   
   useEffect(() => {
@@ -34,7 +42,6 @@ const PSVMenuScreen = ({ onNavigate }) => {
     ).start();
   }, []);
 
-  // PSV 气泡图标生成器
   const renderBubble = (icon, title, color, action) => (
     <TouchableOpacity style={styles.bubbleContainer} onPress={action} activeOpacity={0.6}>
       <View style={[styles.bubble, { backgroundColor: color }]}>
@@ -47,12 +54,9 @@ const PSVMenuScreen = ({ onNavigate }) => {
   return (
     <View style={styles.menuRoot}>
       <StatusBar hidden={true} />
-      
-      {/* 动态波纹背景层 */}
       <Animated.View style={[styles.bgWave1, { transform: [{ scale: breathAnim }] }]} />
       <Animated.View style={[styles.bgWave2, { transform: [{ scale: breathAnim }] }]} />
 
-      {/* 顶部状态栏 */}
       <View style={styles.menuHeader}>
         <Text style={styles.menuTime}>10:04 AM</Text>
         <View style={styles.menuIcons}>
@@ -61,28 +65,34 @@ const PSVMenuScreen = ({ onNavigate }) => {
         </View>
       </View>
 
-      {/* 气泡网格应用列表 */}
       <View style={styles.bubbleGrid}>
-        {renderBubble('videocam', '专属放映室', 'rgba(251, 114, 153, 0.7)', () => onNavigate('watch_party'))}
+        {renderBubble('videocam', '专属放映室', 'rgba(251, 114, 153, 0.7)', () => onNavigate('watch_party', { autoRandom: false }))}
+        {/* ⚠️ 新增：随机盲盒菜单项 */}
+        {renderBubble('shuffle', '随机盲盒', 'rgba(255, 165, 0, 0.7)', () => onNavigate('watch_party', { autoRandom: true }))}
         {renderBubble('game-controller', '开源游戏库', 'rgba(0, 200, 255, 0.7)', () => Alert.alert('提示', '开源游戏索引模块开发中...'))}
         {renderBubble('book', 'JoJo 设定集', 'rgba(150, 50, 255, 0.7)', () => Alert.alert('提示', 'JoJo 宇宙图鉴整理中...'))}
-        {renderBubble('settings', '系统设定', 'rgba(100, 100, 100, 0.7)', () => Alert.alert('提示', '系统控制台尚未挂载'))}
       </View>
     </View>
   );
 };
 
 // ==========================================
-// 🎬 视界 2: 放映室应用组件 (原有逻辑封装)
+// 🎬 视界 2: 放映室应用组件
 // ==========================================
-const WatchPartyScreen = ({ onBack }) => {
+const WatchPartyScreen = ({ onBack, routeParams }) => {
   const [serverIp, setServerIp] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null); 
   
   const webviewRef = useRef(null);
   const [syncStatus, setSyncStatus] = useState('连接中...');
-  const [videoBvid, setVideoBvid] = useState('BV1LSXDBiEGG');
+  
+  // ⚠️ 新增：如果入口是随机盲盒，初始化时就随机抽取一个 ID
+  const initialBvid = routeParams?.autoRandom 
+    ? RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)] 
+    : 'BV1LSXDBiEGG';
+  const [videoBvid, setVideoBvid] = useState(initialBvid);
+  
   const [inputBvid, setInputBvid] = useState('');
   const [chatInput, setChatInput] = useState('');
   
@@ -105,11 +115,7 @@ const WatchPartyScreen = ({ onBack }) => {
       } catch (e) {}
     };
     loadSavedIp();
-
-    return () => { 
-      if (socketRef.current) socketRef.current.disconnect(); 
-      clearHideTimer();
-    };
+    return () => { if (socketRef.current) socketRef.current.disconnect(); clearHideTimer(); };
   }, []);
 
   const clearHideTimer = () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); };
@@ -143,7 +149,14 @@ const WatchPartyScreen = ({ onBack }) => {
     const socket = io(url, { transports: ['websocket'] });
     socketRef.current = socket;
 
-    socket.on('connect', () => { setSyncStatus('已连接好友 🟢'); setIsConnected(true); startHideTimer(); });
+    socket.on('connect', () => { 
+      setSyncStatus('已连接好友 🟢'); setIsConnected(true); startHideTimer(); 
+      // ⚠️ 如果是随机进入的，连接成功后立刻强制同步双端
+      if (routeParams?.autoRandom) {
+        socket.emit('change_video', { bvid: initialBvid });
+      }
+    });
+    
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
     
     socket.on('receive_danmaku', (data) => {
@@ -275,16 +288,22 @@ const WatchPartyScreen = ({ onBack }) => {
     if (bvid && socketRef.current) { setVideoBvid(bvid); socketRef.current.emit('change_video', { bvid: bvid }); }
   };
 
+  // ⚠️ 新增：随机换片功能（模拟刷视频）
+  const playRandomVideo = () => {
+    startHideTimer();
+    const randomId = RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)];
+    setVideoBvid(randomId);
+    if (socketRef.current) socketRef.current.emit('change_video', { bvid: randomId });
+  };
+
   if (!isConnected) {
     return (
       <View style={styles.setupContainer}>
         <StatusBar hidden={true} />
-        {/* ⚠️ 新增：退回主菜单的按钮 */}
         <TouchableOpacity style={styles.backBtnWrapper} onPress={onBack}>
           <Ionicons name="arrow-back" size={28} color="#FFF" />
         </TouchableOpacity>
-
-        <Text style={styles.setupTitle}>⚙️ 专属放映室配置</Text>
+        <Text style={styles.setupTitle}>⚙️ {routeParams?.autoRandom ? '准备开启盲盒' : '专属放映室配置'}</Text>
         <TextInput style={styles.setupInput} placeholder="例如: 服务器IP:3000" placeholderTextColor="#888" value={serverIp} onChangeText={setServerIp} keyboardType="url" autoCapitalize="none" />
         <TouchableOpacity style={styles.setupBtn} onPress={connectToServer}>
           <Text style={styles.setupBtnText}>启动链路</Text>
@@ -304,8 +323,7 @@ const WatchPartyScreen = ({ onBack }) => {
           userAgent="Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
           injectedJavaScript={injectedMonitorScript}
           onMessage={onMessage}
-          mediaPlaybackRequiresUserAction={false}
-          javaScriptEnabled={true} domStorageEnabled={true} originWhitelist={['*']} mixedContentMode="always" allowsInlineMediaPlayback={true} 
+          mediaPlaybackRequiresUserAction={false} javaScriptEnabled={true} domStorageEnabled={true} originWhitelist={['*']} mixedContentMode="always" allowsInlineMediaPlayback={true} 
         />
       </View>
 
@@ -313,7 +331,6 @@ const WatchPartyScreen = ({ onBack }) => {
         <View style={styles.topSection} pointerEvents="box-none">
           <View style={styles.statusBar}>
             <View style={{flexDirection:'row', alignItems:'center'}}>
-              {/* ⚠️ 放映室内增加返回主菜单的功能 */}
               <TouchableOpacity onPress={onBack} style={{marginRight: 10}}>
                 <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.7)" />
               </TouchableOpacity>
@@ -324,6 +341,11 @@ const WatchPartyScreen = ({ onBack }) => {
           <View style={styles.searchBar}>
             <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
             <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}><Text style={styles.btnText}>换片</Text></TouchableOpacity>
+            
+            {/* ⚠️ 新增：随机盲盒按钮，点击即可全网同步切到下一个随机视频 */}
+            <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#ff9800', marginLeft: 10, paddingHorizontal: 10}]} onPress={playRandomVideo}>
+              <Ionicons name="dice" size={20} color="#FFF" />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -347,22 +369,19 @@ const WatchPartyScreen = ({ onBack }) => {
 };
 
 // ==========================================
-// 🚀 根容器: 负责路由状态派发
+// 🚀 根容器
 // ==========================================
 export default function App() {
   const [currentRoute, setCurrentRoute] = useState('menu');
+  const [routeParams, setRouteParams] = useState(null);
 
   if (currentRoute === 'menu') {
-    return <PSVMenuScreen onNavigate={setCurrentRoute} />;
+    return <PSVMenuScreen onNavigate={(route, params) => { setCurrentRoute(route); setRouteParams(params); }} />;
   }
-  return <WatchPartyScreen onBack={() => setCurrentRoute('menu')} />;
+  return <WatchPartyScreen routeParams={routeParams} onBack={() => { setCurrentRoute('menu'); setRouteParams(null); }} />;
 }
 
-// ==========================================
-// 🎨 全局样式表
-// ==========================================
 const styles = StyleSheet.create({
-  // --- PSV 菜单样式 ---
   menuRoot: { flex: 1, backgroundColor: '#0a0a1a', justifyContent: 'center', alignItems: 'center' },
   bgWave1: { position: 'absolute', width: 800, height: 800, borderRadius: 400, backgroundColor: 'rgba(0, 150, 255, 0.15)', top: -200, left: -200 },
   bgWave2: { position: 'absolute', width: 600, height: 600, borderRadius: 300, backgroundColor: 'rgba(150, 0, 255, 0.1)', bottom: -150, right: -150 },
@@ -374,7 +393,6 @@ const styles = StyleSheet.create({
   bubble: { width: 76, height: 76, borderRadius: 38, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 10 },
   bubbleText: { color: '#FFF', marginTop: 10, fontSize: 13, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
 
-  // --- 放映室样式 ---
   backBtnWrapper: { position: 'absolute', top: 30, left: 30, zIndex: 10, padding: 10 },
   setupContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', padding: 20 },
   setupTitle: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 30 },
