@@ -8,16 +8,12 @@ import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
+// ⚠️ 核心新增：引入 Expo 官方安卓导航栏底座强控模块
+import * as NavigationBar from 'expo-navigation-bar'; 
 
-// ⚠️ 新增：静态盲盒数据池 (可自行扩充高质量 BVID)
 const RANDOM_BVID_POOL = [
-  'BV1LSXDBiEGG', // 默认高画质风景
-  'BV1GJ411x7h7', // 经典爆款
-  'BV1xx411c7mD', // 热门动画
-  'BV17x411w7KC', // 知识科普
-  'BV1qM4y1w716', // 音乐 MV
-  'BV1aA4y1I7vL', // 鬼畜经典
-  'BV1Q54y1y7eA'  // 游戏混剪
+  'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
+  'BV1qM4y1w716', 'BV1aA4y1I7vL', 'BV1Q54y1y7eA'
 ];
 
 const formatTime = (seconds) => {
@@ -53,7 +49,6 @@ const PSVMenuScreen = ({ onNavigate }) => {
 
   return (
     <View style={styles.menuRoot}>
-      <StatusBar hidden={true} />
       <Animated.View style={[styles.bgWave1, { transform: [{ scale: breathAnim }] }]} />
       <Animated.View style={[styles.bgWave2, { transform: [{ scale: breathAnim }] }]} />
 
@@ -67,7 +62,6 @@ const PSVMenuScreen = ({ onNavigate }) => {
 
       <View style={styles.bubbleGrid}>
         {renderBubble('videocam', '专属放映室', 'rgba(251, 114, 153, 0.7)', () => onNavigate('watch_party', { autoRandom: false }))}
-        {/* ⚠️ 新增：随机盲盒菜单项 */}
         {renderBubble('shuffle', '随机盲盒', 'rgba(255, 165, 0, 0.7)', () => onNavigate('watch_party', { autoRandom: true }))}
         {renderBubble('game-controller', '开源游戏库', 'rgba(0, 200, 255, 0.7)', () => Alert.alert('提示', '开源游戏索引模块开发中...'))}
         {renderBubble('book', 'JoJo 设定集', 'rgba(150, 50, 255, 0.7)', () => Alert.alert('提示', 'JoJo 宇宙图鉴整理中...'))}
@@ -81,17 +75,14 @@ const PSVMenuScreen = ({ onNavigate }) => {
 // ==========================================
 const WatchPartyScreen = ({ onBack, routeParams }) => {
   const [serverIp, setServerIp] = useState('');
+  const [roomId, setRoomId] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null); 
-  const [roomId, setRoomId] = useState('');
   
   const webviewRef = useRef(null);
   const [syncStatus, setSyncStatus] = useState('连接中...');
   
-  // ⚠️ 新增：如果入口是随机盲盒，初始化时就随机抽取一个 ID
-  const initialBvid = routeParams?.autoRandom 
-    ? RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)] 
-    : 'BV1LSXDBiEGG';
+  const initialBvid = routeParams?.autoRandom ? RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)] : 'BV1LSXDBiEGG';
   const [videoBvid, setVideoBvid] = useState(initialBvid);
   
   const [inputBvid, setInputBvid] = useState('');
@@ -157,15 +148,11 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     socketRef.current = socket;
 
     socket.on('connect', () => { 
-      // ⚠️ 核心新增：连接成功后立刻加入对应房间
       socket.emit('join_room', targetRoom);
-      
       setSyncStatus(`已加入包厢: ${targetRoom} 🟢`); 
       setIsConnected(true); 
       startHideTimer(); 
-      if (routeParams?.autoRandom) {
-        socket.emit('change_video', { bvid: initialBvid });
-      }
+      if (routeParams?.autoRandom) socket.emit('change_video', { bvid: initialBvid });
     });
     
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
@@ -299,7 +286,6 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     if (bvid && socketRef.current) { setVideoBvid(bvid); socketRef.current.emit('change_video', { bvid: bvid }); }
   };
 
-  // ⚠️ 新增：随机换片功能（模拟刷视频）
   const playRandomVideo = () => {
     startHideTimer();
     const randomId = RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)];
@@ -310,20 +296,12 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   if (!isConnected) {
     return (
       <View style={styles.setupContainer}>
-        <StatusBar hidden={true} />
         <TouchableOpacity style={styles.backBtnWrapper} onPress={onBack}>
           <Ionicons name="arrow-back" size={28} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.setupTitle}>⚙️ {routeParams?.autoRandom ? '准备开启盲盒' : '专属放映室配置'}</Text>
         <TextInput style={styles.setupInput} placeholder="例如: 服务器IP:3000" placeholderTextColor="#888" value={serverIp} onChangeText={setServerIp} keyboardType="url" autoCapitalize="none" />
-        <TextInput 
-          style={[styles.setupInput, {marginTop: -5}]} 
-          placeholder="请输入房间口令 (如: 520)" 
-          placeholderTextColor="#888" 
-          value={roomId} 
-          onChangeText={setRoomId} 
-          autoCapitalize="none" 
-        />
+        <TextInput style={[styles.setupInput, {marginTop: -5}]} placeholder="请输入房间口令 (如: 520)" placeholderTextColor="#888" value={roomId} onChangeText={setRoomId} autoCapitalize="none" />
         <TouchableOpacity style={styles.setupBtn} onPress={connectToServer}>
           <Text style={styles.setupBtnText}>启动链路</Text>
         </TouchableOpacity>
@@ -333,7 +311,6 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <StatusBar hidden={true} />
       <View style={styles.videoContainer}>
         <WebView
           ref={webviewRef}
@@ -358,16 +335,12 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
             <View style={styles.statusBadge}><Text style={styles.statusText}>{syncStatus}</Text></View>
           </View>
           <View style={styles.searchBar}>
-            {/* ⚠️ 核心隔离：如果不是盲盒模式，才显示 BV 号输入框和手动换片 */}
             {!routeParams?.autoRandom ? (
               <>
                 <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
-                <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}>
-                  <Text style={styles.btnText}>换片</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}><Text style={styles.btnText}>换片</Text></TouchableOpacity>
               </>
             ) : (
-              /* ⚠️ 核心隔离：如果是盲盒模式，只显示一个宽大醒目的随机抽卡按钮 */
               <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#ff9800', flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'}]} onPress={playRandomVideo}>
                 <Ionicons name="dice" size={20} color="#FFF" style={{marginRight: 8}} />
                 <Text style={styles.btnText}>换个盲盒视频</Text>
@@ -396,16 +369,39 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
 };
 
 // ==========================================
-// 🚀 根容器
+// 🚀 根容器 (沉浸式结界驻留区)
 // ==========================================
 export default function App() {
   const [currentRoute, setCurrentRoute] = useState('menu');
   const [routeParams, setRouteParams] = useState(null);
 
-  if (currentRoute === 'menu') {
-    return <PSVMenuScreen onNavigate={(route, params) => { setCurrentRoute(route); setRouteParams(params); }} />;
-  }
-  return <WatchPartyScreen routeParams={routeParams} onBack={() => { setCurrentRoute('menu'); setRouteParams(null); }} />;
+  useEffect(() => {
+    // 1. 处理顶部状态栏隐身
+    const timer = setTimeout(() => { StatusBar.setHidden(true, 'fade'); }, 100);
+    const interval = setInterval(() => { StatusBar.setHidden(true, 'none'); }, 2000); 
+
+    // 2. ⚠️ 核心提权：强行接管 Android 底部导航栏，启动粘性沉浸模式
+    if (Platform.OS === 'android') {
+      NavigationBar.setVisibilityAsync("hidden");
+      // overlay-swipe: 用户滑动边缘后短暂唤出，几秒后会自动缩回，不会破坏画面
+      NavigationBar.setBehaviorAsync("overlay-swipe"); 
+    }
+
+    return () => { clearTimeout(timer); clearInterval(interval); };
+  }, [currentRoute]); 
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      {/* 全局声明一次，打个底 */}
+      <StatusBar hidden={true} translucent={true} />
+      
+      {currentRoute === 'menu' ? (
+        <PSVMenuScreen onNavigate={(route, params) => { setCurrentRoute(route); setRouteParams(params); }} />
+      ) : (
+        <WatchPartyScreen routeParams={routeParams} onBack={() => { setCurrentRoute('menu'); setRouteParams(null); }} />
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -430,7 +426,7 @@ const styles = StyleSheet.create({
   videoContainer: { flex: 1 },
   webview: { flex: 1 },
   uiOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 20, backgroundColor: 'rgba(0,0,0,0.3)' },
-  topSection: { gap: 10 },
+  topSection: { gap: 10, paddingTop: Platform.OS === 'ios' ? 10 : 5 },
   statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   searchBar: { flexDirection: 'row', alignItems: 'center' },
   bottomSection: { gap: 15, width: '100%' },

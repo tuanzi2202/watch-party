@@ -5,15 +5,20 @@
     "version": "1.0.0",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "androidStatusBar": {
+      "hidden": true,
+      "translucent": true
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "statusBarHidden": true
     },
     "android": {
       "adaptiveIcon": {
