@@ -8,7 +8,6 @@ import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 
-// 时间格式化辅助函数 (将秒数转为 mm:ss)
 const formatTime = (seconds) => {
   if (isNaN(seconds) || seconds < 0) return '00:00';
   const m = Math.floor(seconds / 60);
@@ -29,10 +28,9 @@ export default function WatchPartyApp() {
   const [uiVisible, setUiVisible] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // ⚠️ 新增：原生进度条所需的视频状态管理
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const isSliding = useRef(false); // 拖拽互斥锁（使用 ref 避免引发组件不必要的重渲染）
+  const isSliding = useRef(false); 
 
   useEffect(() => {
     const loadSavedIp = async () => {
@@ -65,7 +63,6 @@ export default function WatchPartyApp() {
     
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
     
-    // 接收远端弹幕
     socket.on('receive_danmaku', (data) => {
       if (!webviewRef.current) return;
       const injectDanmakuScript = `
@@ -74,6 +71,7 @@ export default function WatchPartyApp() {
           if(!container) {
               container = document.createElement('div');
               container.id = 'custom-rn-danmaku';
+              // Z-Index 设置为 999999，确保漂浮在强行置顶的视频上方
               container.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:999999;overflow:hidden;';
               document.body.appendChild(container);
               var style = document.createElement('style');
@@ -106,6 +104,16 @@ export default function WatchPartyApp() {
   };
 
   const injectedMonitorScript = `
+    // ⚠️ 核心降维打击：放弃 CSS 类名猜测战，直接将 raw video 标签强行置顶铺满！
+    // 彻底掩埋 B 站自带的任何 Shadow DOM UI 和控制条！
+    setInterval(function() {
+      var video = document.querySelector('video');
+      if (video && video.style.position !== 'fixed') {
+        // 设置 z-index 为 9998，保证视频压住原有UI，但留出空间让我们的自定义弹幕(999999)在上面飞
+        video.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 9998 !important; object-fit: contain !important; background: #000 !important; margin: 0 !important; padding: 0 !important; pointer-events: none !important;';
+      }
+    }, 500);
+
     var isRemoteSyncing = false;
     var lastTime = 0;
     var lastState = 'paused';
@@ -129,7 +137,6 @@ export default function WatchPartyApp() {
         var duration = video.duration || 0;
         var currentState = video.paused ? 'paused' : 'playing';
         
-        // ⚠️ 新增：高频向 RN 发送纯粹的进度更新（用于渲染 Slider）
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'PROGRESS_UPDATE',
           time: currentTime,
@@ -171,7 +178,6 @@ export default function WatchPartyApp() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'PROGRESS_UPDATE') {
-        // ⚠️ 核心锁机制：只有在用户手指没有按在 Slider 上时，才允许底层时间更新 UI
         if (!isSliding.current) {
           setCurrentTime(msg.time);
           setDuration(msg.duration);
@@ -184,13 +190,11 @@ export default function WatchPartyApp() {
     } catch (e) {}
   };
 
-  // ⚠️ 新增：处理原生 Slider 拖动事件
   const handleSlidingStart = () => {
-    isSliding.current = true; // 上锁：屏蔽 WebView 的进度汇报
+    isSliding.current = true; 
   };
 
   const handleSlidingComplete = (value) => {
-    // 1. 将时间强制注入回 WebView
     if (webviewRef.current) {
       webviewRef.current.injectJavaScript(`
         var video = document.querySelector('video');
@@ -198,13 +202,10 @@ export default function WatchPartyApp() {
         true;
       `);
     }
-    // 2. 向全网广播这一次原生拖拽跳转
     if (socketRef.current) {
       socketRef.current.emit('sync_send', { time: value, state: 'playing' });
     }
-    
     setCurrentTime(value);
-    // 延迟 500ms 解锁，给网络和底层 DOM 反应时间，防止进度条回弹闪烁
     setTimeout(() => { isSliding.current = false; }, 500);
   };
 
@@ -277,7 +278,6 @@ export default function WatchPartyApp() {
         </View>
 
         <View style={styles.bottomSection} pointerEvents="box-none">
-          {/* ⚠️ 新增：原生极致丝滑进度轴 */}
           <View style={styles.sliderPanel}>
             <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
             <Slider
@@ -318,12 +318,9 @@ const styles = StyleSheet.create({
   statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   searchBar: { flexDirection: 'row', alignItems: 'center' },
   bottomSection: { gap: 15, width: '100%' },
-  
-  // ⚠️ 新增：原生进度轴样式
   sliderPanel: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 5 },
   timeText: { color: '#FFF', fontSize: 12, fontVariant: ['tabular-nums'], width: 45, textAlign: 'center' },
   slider: { flex: 1, height: 40, marginHorizontal: 5 },
-  
   chatPanel: { flexDirection: 'row', alignItems: 'center' },
   roomTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
