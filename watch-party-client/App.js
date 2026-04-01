@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
-  View, Text, StyleSheet, StatusBar, TouchableOpacity, 
+  View, Text, StyleSheet, TouchableOpacity, 
   TextInput, Animated, KeyboardAvoidingView, Platform, Keyboard, Alert, Dimensions
 } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -10,6 +10,9 @@ import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 // ⚠️ 核心新增：引入 Expo 官方安卓导航栏底座强控模块
 import * as NavigationBar from 'expo-navigation-bar'; 
+// ⚠️ 核心修复 1：使用 Expo 官方的高级状态栏组件，替代 React Native 原生的脆弱组件
+import { StatusBar } from 'expo-status-bar';
+import { StatusBar as RNStatusBar } from 'react-native'; // 保留原生 API 用于指令式强控
 
 const RANDOM_BVID_POOL = [
   'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
@@ -376,22 +379,33 @@ export default function App() {
   const [routeParams, setRouteParams] = useState(null);
 
   useEffect(() => {
-    // 1. 处理顶部状态栏隐身
-    const timer = setTimeout(() => { StatusBar.setHidden(true, 'fade'); }, 100);
-    const interval = setInterval(() => { StatusBar.setHidden(true, 'none'); }, 2000); 
+    const enforceImmersiveMode = async () => {
+      // ⚠️ 核心修复 2：防弹衣逻辑。即使 NavigationBar 崩溃，也绝不牵连 StatusBar
+      try {
+        if (Platform.OS === 'android') {
+          await NavigationBar.setVisibilityAsync("hidden");
+        }
+      } catch (error) {
+        console.warn("底部导航栏隐藏指令被系统拦截，但这不影响状态栏隐藏:", error.message);
+      } finally {
+        // Finally 块中的代码拥有最高执行特权，必定会运行！
+        RNStatusBar.setHidden(true, 'none');
+      }
+    };
 
-    // 2. ⚠️ 核心提权：强行接管 Android 底部导航栏，启动粘性沉浸模式
-    if (Platform.OS === 'android') {
-      NavigationBar.setVisibilityAsync("hidden"); 
-    }
+    enforceImmersiveMode();
 
-    return () => { clearTimeout(timer); clearInterval(interval); };
+    const interval = setInterval(() => {
+      RNStatusBar.setHidden(true, 'none');
+    }, 2000); 
+
+    return () => clearInterval(interval);
   }, [currentRoute]); 
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
-      {/* 全局声明一次，打个底 */}
-      <StatusBar hidden={true} translucent={true} />
+      {/* ⚠️ 核心修复 3：使用 Expo 官方组件兜底。即使指令式 API 失效，声明式属性也能强制隐身 */}
+      <StatusBar hidden={true} style="light" backgroundColor="transparent" translucent={true} />
       
       {currentRoute === 'menu' ? (
         <PSVMenuScreen onNavigate={(route, params) => { setCurrentRoute(route); setRouteParams(params); }} />
