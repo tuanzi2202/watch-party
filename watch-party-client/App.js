@@ -126,72 +126,60 @@ export default function WatchPartyApp() {
     var lastTime = 0;
     var lastState = 'paused';
 
-    // 暴露供 RN 调用的远端同步执行函数
     window.executeRemoteSync = function(time, state) {
        isRemoteSyncing = true;
        var video = document.querySelector('video');
        if (video) {
-         window.ReactNativeWebView.postMessage(JSON.stringify({type: 'LOG', msg: '【探针-Web内】已收到并准备执行同步: ' + time + '秒'}));
-         if (Math.abs(video.currentTime - time) > 1.5) {
-           video.currentTime = time;
-         }
-         if (state === 'playing' && video.paused) {
-           video.play().catch(function(e){});
-         } else if (state === 'paused' && !video.paused) {
-           video.pause();
-         }
-       } else {
-         window.ReactNativeWebView.postMessage(JSON.stringify({type: 'LOG', msg: '【探针-Web内错误】DOM 中找不到视频标签'}));
+         if (Math.abs(video.currentTime - time) > 1.5) video.currentTime = time;
+         if (state === 'playing' && video.paused) video.play().catch(function(e){});
+         else if (state === 'paused' && !video.paused) video.pause();
        }
        setTimeout(function(){ isRemoteSyncing = false; }, 1000);
     };
 
-    // 本地拖动检测轮询
     setInterval(function() {
       if(isRemoteSyncing) return;
       var video = document.querySelector('video');
       if (video) {
         var currentTime = video.currentTime;
         var currentState = video.paused ? 'paused' : 'playing';
-        
         var timeDiff = currentTime - lastTime;
         var isSeeking = (Math.abs(timeDiff) > 2 && currentState === 'playing') || (Math.abs(timeDiff) > 0.5 && currentState === 'paused');
         var isStateChanged = currentState !== lastState;
 
         if (isSeeking || isStateChanged) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'LOG',
-            msg: '【探针-Web内】检测到主动行为 (拖动/暂停播放)，当前时间: ' + currentTime + 's'
-          }));
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'SYNC_ACTION',
-            time: currentTime,
-            state: currentState
-          }));
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SYNC_ACTION', time: currentTime, state: currentState }));
         }
-        lastTime = currentTime;
-        lastState = currentState;
+        lastTime = currentTime; lastState = currentState;
       }
     }, 500);
 
-    // 原有的双击唤出UI逻辑
+    // ⚠️ 核心提权与拦截机制
     var tapTimer = null;
     var lastTap = 0;
+    
     window.addEventListener('click', function(e) {
+      // 坐标防线：放过屏幕底部 90px 的原生进度条和全屏按钮区域，不予拦截
+      if (e.clientY > window.innerHeight - 90) return; 
+
+      // 绝对熔断：切断事件向下传播，B 站原生框架将彻底变成“瞎子”收不到本次点击
+      e.stopPropagation(); 
+      
       var now = Date.now();
       if (now - lastTap < 300) {
+        // 双击：触发原生的播放/暂停逻辑
         clearTimeout(tapTimer);
         var video = document.querySelector('video');
-        if (video) {
-          video.paused ? video.play() : video.pause();
-        }
+        if (video) { video.paused ? video.play() : video.pause(); }
       } else {
+        // 单击：延迟 300ms 确认不是双击后，唤出我们自定义的 UI
         tapTimer = setTimeout(function() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'TOGGLE_UI' }));
         }, 300);
       }
       lastTap = now;
-    }, true); 
+    }, true); // ⚠️ 注意这个 true：代表在事件向下传递的“捕获阶段”就提前半路打劫
+    
     true;
   `;
 

@@ -158,25 +158,37 @@
       }
     }
 
+    // ⚠️ 新增：PC 端 UI 显示状态寄存器
+    let pcUiVisible = true;
+    function togglePCUI() {
+      pcUiVisible = !pcUiVisible;
+      uiEl.style.opacity = pcUiVisible ? '1' : '0';
+      chatBar.style.opacity = pcUiVisible ? '1' : '0';
+      // 隐藏时彻底禁用输入框的鼠标检测，防止幽灵点击
+      chatBar.style.pointerEvents = pcUiVisible ? 'auto' : 'none'; 
+    }
+
     function initNetwork(serverUrl) {
       socket = io(serverUrl, { transports: ['websocket'] });
       
       socket.on('connect', () => { 
         updateStatus('已连接放映室', '#00e676');
-        setTimeout(() => { uiEl.style.opacity = '0.3'; chatBar.style.opacity = '0.3'; }, 3000);
+        // 废弃原先的定时自动消失逻辑，改为严格受用户点击控制
       });
-      // 鼠标划过输入框时恢复不透明
-      chatBar.addEventListener('mouseenter', () => chatBar.style.opacity = '1');
-      chatBar.addEventListener('mouseleave', () => chatBar.style.opacity = '0.3');
+
+      // ⚠️ 新增：监听 B 站 Webview 内部传出的伪装信令
+      biliWebview.addEventListener('console-message', (e) => {
+        if (e.message === 'TOGGLE_UI_PC') {
+          togglePCUI();
+        } else if (e.message.startsWith('【探针')) {
+          console.log(e.message);
+        }
+      });
 
       let isRemoteSyncing = false;
       let lastTime = 0; let lastState = 'paused';
 
-      // ⚠️ 新增：接收任意一端广播的弹幕
-      socket.on('receive_danmaku', (data) => {
-        console.log('【探针-PC接收】收到弹幕:', data.text);
-        shootDanmaku(data.text);
-      });
+      socket.on('receive_danmaku', (data) => { shootDanmaku(data.text); });
 
       socket.on('change_video', (data) => {
         updateStatus('正在换片...', '#00aeec');
@@ -201,6 +213,33 @@
 
       setInterval(() => {
         if (isRemoteSyncing) return; 
+        
+        // ⚠️ 新增：在定时器中持续尝试向 B 站注入交互拦截防线（自带执行锁防止重复注入）
+        biliWebview.executeJavaScript(`
+          (function() {
+            if (window.__interaction_injected) return;
+            window.__interaction_injected = true;
+            
+            var tapTimer = null;
+            var lastTap = 0;
+            window.addEventListener('click', function(e) {
+              if (e.clientY > window.innerHeight - 90) return; // 避开 B 站底部控制栏
+              
+              e.stopPropagation(); // 切断 B 站原生暂停逻辑
+              
+              var now = Date.now();
+              if (now - lastTap < 300) {
+                 clearTimeout(tapTimer);
+                 var video = document.querySelector('video');
+                 if (video) { video.paused ? video.play() : video.pause(); }
+              } else {
+                 tapTimer = setTimeout(function() { console.log('TOGGLE_UI_PC'); }, 300);
+              }
+              lastTap = now;
+            }, true);
+          })();
+        `).catch(() => {});
+
         biliWebview.executeJavaScript(`
           (function() { var v = document.querySelector('video'); return v ? { time: v.currentTime, paused: v.paused } : null; })();
         `).then((result) => {
