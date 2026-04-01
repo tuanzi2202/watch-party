@@ -7,6 +7,7 @@ import { WebView } from 'react-native-webview';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
+import { Ionicons } from '@expo/vector-icons'; // ⚠️ 新增：引入专业矢量图标库
 
 const formatTime = (seconds) => {
   if (isNaN(seconds) || seconds < 0) return '00:00';
@@ -25,12 +26,17 @@ export default function WatchPartyApp() {
   const [videoBvid, setVideoBvid] = useState('BV1LSXDBiEGG');
   const [inputBvid, setInputBvid] = useState('');
   const [chatInput, setChatInput] = useState('');
+  
   const [uiVisible, setUiVisible] = useState(true);
+  const uiVisibleRef = useRef(true); // ⚠️ 核心修复：引入 Ref 绕过闭包陷阱，记录 UI 真实物理状态
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false); 
+  
   const isSliding = useRef(false); 
+  const hideTimerRef = useRef(null);
 
   useEffect(() => {
     const loadSavedIp = async () => {
@@ -41,8 +47,51 @@ export default function WatchPartyApp() {
     };
     loadSavedIp();
 
-    return () => { if (socketRef.current) socketRef.current.disconnect(); };
+    return () => { 
+      if (socketRef.current) socketRef.current.disconnect(); 
+      clearHideTimer();
+    };
   }, []);
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  };
+
+  const startHideTimer = () => {
+    clearHideTimer();
+    hideTimerRef.current = setTimeout(() => {
+      // ⚠️ 安全检查：只有在 UI 当前确实显示时，才执行隐藏
+      if (uiVisibleRef.current) {
+        forceHideUI();
+      }
+    }, 4000);
+  };
+
+  // ⚠️ 新增：绝对安全的原子化 UI 显隐控制器
+  const forceHideUI = () => {
+    if (!uiVisibleRef.current) return;
+    Animated.timing(fadeAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+    setUiVisible(false);
+    uiVisibleRef.current = false;
+    Keyboard.dismiss();
+  };
+
+  const forceShowUI = () => {
+    if (uiVisibleRef.current) return;
+    Animated.timing(fadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+    setUiVisible(true);
+    uiVisibleRef.current = true;
+    startHideTimer(); // 唤出后立刻开始倒计时
+  };
+
+  const toggleUI = () => {
+    if (uiVisibleRef.current) {
+      clearHideTimer();
+      forceHideUI();
+    } else {
+      forceShowUI();
+    }
+  };
 
   const connectToServer = async () => {
     if (!serverIp.trim()) return Alert.alert('提示', '请输入服务器 IP');
@@ -59,6 +108,7 @@ export default function WatchPartyApp() {
     socket.on('connect', () => {
       setSyncStatus('已连接好友 🟢');
       setIsConnected(true); 
+      startHideTimer(); 
     });
     
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
@@ -71,7 +121,6 @@ export default function WatchPartyApp() {
           if(!container) {
               container = document.createElement('div');
               container.id = 'custom-rn-danmaku';
-              // Z-Index 设置为 999999，确保漂浮在强行置顶的视频上方
               container.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:999999;overflow:hidden;';
               document.body.appendChild(container);
               var style = document.createElement('style');
@@ -104,12 +153,9 @@ export default function WatchPartyApp() {
   };
 
   const injectedMonitorScript = `
-    // ⚠️ 核心降维打击：放弃 CSS 类名猜测战，直接将 raw video 标签强行置顶铺满！
-    // 彻底掩埋 B 站自带的任何 Shadow DOM UI 和控制条！
     setInterval(function() {
       var video = document.querySelector('video');
       if (video && video.style.position !== 'fixed') {
-        // 设置 z-index 为 9998，保证视频压住原有UI，但留出空间让我们的自定义弹幕(999999)在上面飞
         video.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 9998 !important; object-fit: contain !important; background: #000 !important; margin: 0 !important; padding: 0 !important; pointer-events: none !important;';
       }
     }, 500);
@@ -140,7 +186,8 @@ export default function WatchPartyApp() {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'PROGRESS_UPDATE',
           time: currentTime,
-          duration: duration
+          duration: duration,
+          state: currentState 
         }));
 
         var timeDiff = currentTime - lastTime;
@@ -181,6 +228,7 @@ export default function WatchPartyApp() {
         if (!isSliding.current) {
           setCurrentTime(msg.time);
           setDuration(msg.duration);
+          setIsPlaying(msg.state === 'playing'); 
         }
       } else if (msg.type === 'SYNC_ACTION' && socketRef.current) {
         socketRef.current.emit('sync_send', { time: msg.time, state: msg.state });
@@ -190,11 +238,30 @@ export default function WatchPartyApp() {
     } catch (e) {}
   };
 
+  const togglePlayPause = () => {
+    const nextState = !isPlaying;
+    setIsPlaying(nextState);
+    startHideTimer(); 
+
+    if (webviewRef.current) {
+      webviewRef.current.injectJavaScript(`
+        var video = document.querySelector('video');
+        if (video) { ${nextState ? 'video.play()' : 'video.pause()'}; }
+        true;
+      `);
+    }
+    if (socketRef.current) {
+      socketRef.current.emit('sync_send', { time: currentTime, state: nextState ? 'playing' : 'paused' });
+    }
+  };
+
   const handleSlidingStart = () => {
     isSliding.current = true; 
+    clearHideTimer(); 
   };
 
   const handleSlidingComplete = (value) => {
+    startHideTimer(); 
     if (webviewRef.current) {
       webviewRef.current.injectJavaScript(`
         var video = document.querySelector('video');
@@ -207,13 +274,6 @@ export default function WatchPartyApp() {
     }
     setCurrentTime(value);
     setTimeout(() => { isSliding.current = false; }, 500);
-  };
-
-  const toggleUI = () => {
-    const toValue = uiVisible ? 0 : 1;
-    Animated.timing(fadeAnim, { toValue, duration: 250, useNativeDriver: true }).start();
-    setUiVisible(!uiVisible);
-    Keyboard.dismiss();
   };
 
   const sendDanmaku = () => {
@@ -272,13 +332,25 @@ export default function WatchPartyApp() {
             <View style={styles.statusBadge}><Text style={styles.statusText}>{syncStatus}</Text></View>
           </View>
           <View style={styles.searchBar}>
-            <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} />
+            <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
             <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}><Text style={styles.btnText}>换片</Text></TouchableOpacity>
           </View>
         </View>
 
+        {/* ⚠️ 核心删减：移除了多余的中央快进按钮区域 */}
+
         <View style={styles.bottomSection} pointerEvents="box-none">
           <View style={styles.sliderPanel}>
+            <TouchableOpacity onPress={togglePlayPause} style={styles.playPauseBtn}>
+              {/* ⚠️ 核心UI：直接调用 Expo 内置的 Ionicons 矢量图，彻底还原原生播放器质感 */}
+              <Ionicons 
+                name={isPlaying ? "pause" : "play"} 
+                size={22} 
+                color="#FFF" 
+                style={{ marginLeft: isPlaying ? 0 : 3 }} // 播放三角形几何中心微调
+              />
+            </TouchableOpacity>
+            
             <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
             <Slider
               style={styles.slider}
@@ -295,7 +367,7 @@ export default function WatchPartyApp() {
           </View>
 
           <View style={styles.chatPanel}>
-            <TextInput style={styles.input} placeholder="发条弹幕互动一下..." placeholderTextColor="#CCC" value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendDanmaku} />
+            <TextInput style={styles.input} placeholder="发条弹幕互动一下..." placeholderTextColor="#CCC" value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendDanmaku} onFocus={clearHideTimer} onBlur={startHideTimer} />
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#00aeec' }]} onPress={sendDanmaku}><Text style={styles.btnText}>发送</Text></TouchableOpacity>
           </View>
         </View>
@@ -317,8 +389,13 @@ const styles = StyleSheet.create({
   topSection: { gap: 10 },
   statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   searchBar: { flexDirection: 'row', alignItems: 'center' },
+  
   bottomSection: { gap: 15, width: '100%' },
   sliderPanel: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 5 },
+  
+  // ⚠️ 核心UI：去除按钮多余的圆形背景底色，使其直接融入底层磨砂条，贴合 B 站设计语言
+  playPauseBtn: { marginRight: 5, justifyContent: 'center', alignItems: 'center', width: 30, height: 30 },
+  
   timeText: { color: '#FFF', fontSize: 12, fontVariant: ['tabular-nums'], width: 45, textAlign: 'center' },
   slider: { flex: 1, height: 40, marginHorizontal: 5 },
   chatPanel: { flexDirection: 'row', alignItems: 'center' },
