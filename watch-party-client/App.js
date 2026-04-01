@@ -76,6 +76,36 @@ export default function WatchPartyApp() {
       console.log('【探针-APP接收】收到远端换片请求:', data.bvid);
       setVideoBvid(data.bvid);
     });
+  
+    // 接收远端弹幕，并直接注入 JavaScript 在网页内部渲染
+    socket.on('receive_danmaku', (data) => {
+      console.log('【探针-APP接收】渲染弹幕:', data.text);
+      if (!webviewRef.current) return;
+      
+      // 动态在网页内部创建一个画板，生成动画弹幕并定时销毁
+      const injectDanmakuScript = `
+        (function() {
+          var container = document.getElementById('custom-rn-danmaku');
+          if(!container) {
+              container = document.createElement('div');
+              container.id = 'custom-rn-danmaku';
+              container.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:999999;overflow:hidden;';
+              document.body.appendChild(container);
+              
+              var style = document.createElement('style');
+              style.innerHTML = '@keyframes danmakuRN { from { transform: translateX(100vw); } to { transform: translateX(-100%); } }';
+              document.head.appendChild(style);
+          }
+          var el = document.createElement('div');
+          el.innerText = '${data.text}';
+          el.style.cssText = 'position:absolute;white-space:nowrap;color:#fff;font-size:20px;font-weight:bold;text-shadow:1px 1px 2px #000;animation:danmakuRN 5s linear forwards;top:' + (Math.random()*50+10) + '%;';
+          container.appendChild(el);
+          setTimeout(function() { el.remove(); }, 5000);
+        })();
+        true;
+      `;
+      webviewRef.current.injectJavaScript(injectDanmakuScript);
+    });
   };
 
   // 换片处理函数

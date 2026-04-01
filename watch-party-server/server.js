@@ -34,6 +34,13 @@ io.on("connection", (socket) => {
       // 将换片指令广播给除发送者以外的所有客户端
       socket.broadcast.emit('change_video', data);
   });
+
+  // 监听任一端发来的弹幕消息
+  socket.on('send_chat', (data) => {
+      console.log(`[信令转发] 房间内有人发送弹幕: ${data.text}`);
+      // 将弹幕广播给全房间所有人（包括发送者自己，这样自己也能看到特效）
+      io.emit('receive_danmaku', data);
+  });
 });
 
 console.log("双人同步信令服务器运行在 ws://localhost:3000");
