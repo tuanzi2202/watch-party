@@ -1,13 +1,15 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
   View, Text, StyleSheet, StatusBar, TouchableOpacity, 
-  TextInput, Animated, KeyboardAvoidingView, Platform, Keyboard, Alert 
+  TextInput, Animated, KeyboardAvoidingView, Platform, Keyboard, Alert, Dimensions
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
-import { Ionicons } from '@expo/vector-icons'; // ⚠️ 新增：引入专业矢量图标库
+import { Ionicons } from '@expo/vector-icons';
+
+const { width } = Dimensions.get('window');
 
 const formatTime = (seconds) => {
   if (isNaN(seconds) || seconds < 0) return '00:00';
@@ -16,7 +18,64 @@ const formatTime = (seconds) => {
   return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
 };
 
-export default function WatchPartyApp() {
+// ==========================================
+// 🎮 视界 1: PSV 风格主菜单组件
+// ==========================================
+const PSVMenuScreen = ({ onNavigate }) => {
+  // 呼吸动画模拟 PSV 的动态流体背景
+  const breathAnim = useRef(new Animated.Value(1)).current;
+  
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(breathAnim, { toValue: 1.08, duration: 4000, useNativeDriver: true }),
+        Animated.timing(breathAnim, { toValue: 1, duration: 4000, useNativeDriver: true })
+      ])
+    ).start();
+  }, []);
+
+  // PSV 气泡图标生成器
+  const renderBubble = (icon, title, color, action) => (
+    <TouchableOpacity style={styles.bubbleContainer} onPress={action} activeOpacity={0.6}>
+      <View style={[styles.bubble, { backgroundColor: color }]}>
+        <Ionicons name={icon} size={42} color="#FFF" />
+      </View>
+      <Text style={styles.bubbleText}>{title}</Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.menuRoot}>
+      <StatusBar hidden={true} />
+      
+      {/* 动态波纹背景层 */}
+      <Animated.View style={[styles.bgWave1, { transform: [{ scale: breathAnim }] }]} />
+      <Animated.View style={[styles.bgWave2, { transform: [{ scale: breathAnim }] }]} />
+
+      {/* 顶部状态栏 */}
+      <View style={styles.menuHeader}>
+        <Text style={styles.menuTime}>10:04 AM</Text>
+        <View style={styles.menuIcons}>
+          <Ionicons name="wifi" size={18} color="#FFF" style={{marginRight: 8}}/>
+          <Ionicons name="battery-full" size={18} color="#FFF" />
+        </View>
+      </View>
+
+      {/* 气泡网格应用列表 */}
+      <View style={styles.bubbleGrid}>
+        {renderBubble('videocam', '专属放映室', 'rgba(251, 114, 153, 0.7)', () => onNavigate('watch_party'))}
+        {renderBubble('game-controller', '开源游戏库', 'rgba(0, 200, 255, 0.7)', () => Alert.alert('提示', '开源游戏索引模块开发中...'))}
+        {renderBubble('book', 'JoJo 设定集', 'rgba(150, 50, 255, 0.7)', () => Alert.alert('提示', 'JoJo 宇宙图鉴整理中...'))}
+        {renderBubble('settings', '系统设定', 'rgba(100, 100, 100, 0.7)', () => Alert.alert('提示', '系统控制台尚未挂载'))}
+      </View>
+    </View>
+  );
+};
+
+// ==========================================
+// 🎬 视界 2: 放映室应用组件 (原有逻辑封装)
+// ==========================================
+const WatchPartyScreen = ({ onBack }) => {
   const [serverIp, setServerIp] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null); 
@@ -28,7 +87,7 @@ export default function WatchPartyApp() {
   const [chatInput, setChatInput] = useState('');
   
   const [uiVisible, setUiVisible] = useState(true);
-  const uiVisibleRef = useRef(true); // ⚠️ 核心修复：引入 Ref 绕过闭包陷阱，记录 UI 真实物理状态
+  const uiVisibleRef = useRef(true); 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const [currentTime, setCurrentTime] = useState(0);
@@ -53,50 +112,29 @@ export default function WatchPartyApp() {
     };
   }, []);
 
-  const clearHideTimer = () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-  };
-
+  const clearHideTimer = () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); };
   const startHideTimer = () => {
     clearHideTimer();
-    hideTimerRef.current = setTimeout(() => {
-      // ⚠️ 安全检查：只有在 UI 当前确实显示时，才执行隐藏
-      if (uiVisibleRef.current) {
-        forceHideUI();
-      }
-    }, 4000);
+    hideTimerRef.current = setTimeout(() => { if (uiVisibleRef.current) forceHideUI(); }, 4000);
   };
 
-  // ⚠️ 新增：绝对安全的原子化 UI 显隐控制器
   const forceHideUI = () => {
     if (!uiVisibleRef.current) return;
     Animated.timing(fadeAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
-    setUiVisible(false);
-    uiVisibleRef.current = false;
-    Keyboard.dismiss();
+    setUiVisible(false); uiVisibleRef.current = false; Keyboard.dismiss();
   };
 
   const forceShowUI = () => {
     if (uiVisibleRef.current) return;
     Animated.timing(fadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
-    setUiVisible(true);
-    uiVisibleRef.current = true;
-    startHideTimer(); // 唤出后立刻开始倒计时
+    setUiVisible(true); uiVisibleRef.current = true; startHideTimer(); 
   };
 
-  const toggleUI = () => {
-    if (uiVisibleRef.current) {
-      clearHideTimer();
-      forceHideUI();
-    } else {
-      forceShowUI();
-    }
-  };
+  const toggleUI = () => { uiVisibleRef.current ? forceHideUI() : forceShowUI(); };
 
   const connectToServer = async () => {
     if (!serverIp.trim()) return Alert.alert('提示', '请输入服务器 IP');
     await AsyncStorage.setItem('watchPartyServerIp', serverIp.trim());
-    
     let url = serverIp.trim();
     if (!url.startsWith('ws://') && !url.startsWith('http://')) url = 'ws://' + url;
 
@@ -105,12 +143,7 @@ export default function WatchPartyApp() {
     const socket = io(url, { transports: ['websocket'] });
     socketRef.current = socket;
 
-    socket.on('connect', () => {
-      setSyncStatus('已连接好友 🟢');
-      setIsConnected(true); 
-      startHideTimer(); 
-    });
-    
+    socket.on('connect', () => { setSyncStatus('已连接好友 🟢'); setIsConnected(true); startHideTimer(); });
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
     
     socket.on('receive_danmaku', (data) => {
@@ -140,13 +173,7 @@ export default function WatchPartyApp() {
 
     socket.on('sync_receive', (data) => {
       if (!webviewRef.current) return;
-      const injectScript = `
-        if(window.executeRemoteSync) {
-          window.executeRemoteSync(${data.time}, '${data.state}');
-        }
-        true;
-      `;
-      webviewRef.current.injectJavaScript(injectScript);
+      webviewRef.current.injectJavaScript(`if(window.executeRemoteSync) { window.executeRemoteSync(${data.time}, '${data.state}'); } true;`);
     });
 
     socket.on('change_video', (data) => { setVideoBvid(data.bvid); });
@@ -161,8 +188,7 @@ export default function WatchPartyApp() {
     }, 500);
 
     var isRemoteSyncing = false;
-    var lastTime = 0;
-    var lastState = 'paused';
+    var lastTime = 0; var lastState = 'paused';
 
     window.executeRemoteSync = function(time, state) {
        isRemoteSyncing = true;
@@ -183,26 +209,18 @@ export default function WatchPartyApp() {
         var duration = video.duration || 0;
         var currentState = video.paused ? 'paused' : 'playing';
         
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'PROGRESS_UPDATE',
-          time: currentTime,
-          duration: duration,
-          state: currentState 
-        }));
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PROGRESS_UPDATE', time: currentTime, duration: duration, state: currentState }));
 
         var timeDiff = currentTime - lastTime;
         var isSeeking = (Math.abs(timeDiff) > 2 && currentState === 'playing') || (Math.abs(timeDiff) > 0.5 && currentState === 'paused');
         var isStateChanged = currentState !== lastState;
 
-        if (isSeeking || isStateChanged) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SYNC_ACTION', time: currentTime, state: currentState }));
-        }
+        if (isSeeking || isStateChanged) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SYNC_ACTION', time: currentTime, state: currentState })); }
         lastTime = currentTime; lastState = currentState;
       }
     }, 500);
 
-    var tapTimer = null;
-    var lastTap = 0;
+    var tapTimer = null; var lastTap = 0;
     window.addEventListener('click', function(e) {
       if (e.clientY > window.innerHeight - 90) return; 
       e.stopPropagation(); 
@@ -212,9 +230,7 @@ export default function WatchPartyApp() {
         var video = document.querySelector('video');
         if (video) { video.paused ? video.play() : video.pause(); }
       } else {
-        tapTimer = setTimeout(function() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'TOGGLE_UI' }));
-        }, 300);
+        tapTimer = setTimeout(function() { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'TOGGLE_UI' })); }, 300);
       }
       lastTap = now;
     }, true); 
@@ -225,53 +241,24 @@ export default function WatchPartyApp() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'PROGRESS_UPDATE') {
-        if (!isSliding.current) {
-          setCurrentTime(msg.time);
-          setDuration(msg.duration);
-          setIsPlaying(msg.state === 'playing'); 
-        }
+        if (!isSliding.current) { setCurrentTime(msg.time); setDuration(msg.duration); setIsPlaying(msg.state === 'playing'); }
       } else if (msg.type === 'SYNC_ACTION' && socketRef.current) {
         socketRef.current.emit('sync_send', { time: msg.time, state: msg.state });
-      } else if (msg.type === 'TOGGLE_UI') {
-        toggleUI();
-      }
+      } else if (msg.type === 'TOGGLE_UI') { toggleUI(); }
     } catch (e) {}
   };
 
   const togglePlayPause = () => {
-    const nextState = !isPlaying;
-    setIsPlaying(nextState);
-    startHideTimer(); 
-
-    if (webviewRef.current) {
-      webviewRef.current.injectJavaScript(`
-        var video = document.querySelector('video');
-        if (video) { ${nextState ? 'video.play()' : 'video.pause()'}; }
-        true;
-      `);
-    }
-    if (socketRef.current) {
-      socketRef.current.emit('sync_send', { time: currentTime, state: nextState ? 'playing' : 'paused' });
-    }
+    const nextState = !isPlaying; setIsPlaying(nextState); startHideTimer(); 
+    if (webviewRef.current) webviewRef.current.injectJavaScript(`var video = document.querySelector('video'); if (video) { ${nextState ? 'video.play()' : 'video.pause()'}; } true;`);
+    if (socketRef.current) socketRef.current.emit('sync_send', { time: currentTime, state: nextState ? 'playing' : 'paused' });
   };
 
-  const handleSlidingStart = () => {
-    isSliding.current = true; 
-    clearHideTimer(); 
-  };
-
+  const handleSlidingStart = () => { isSliding.current = true; clearHideTimer(); };
   const handleSlidingComplete = (value) => {
     startHideTimer(); 
-    if (webviewRef.current) {
-      webviewRef.current.injectJavaScript(`
-        var video = document.querySelector('video');
-        if (video) { video.currentTime = ${value}; }
-        true;
-      `);
-    }
-    if (socketRef.current) {
-      socketRef.current.emit('sync_send', { time: value, state: 'playing' });
-    }
+    if (webviewRef.current) webviewRef.current.injectJavaScript(`var video = document.querySelector('video'); if (video) { video.currentTime = ${value}; } true;`);
+    if (socketRef.current) socketRef.current.emit('sync_send', { time: value, state: 'playing' });
     setCurrentTime(value);
     setTimeout(() => { isSliding.current = false; }, 500);
   };
@@ -279,27 +266,28 @@ export default function WatchPartyApp() {
   const sendDanmaku = () => {
     if (chatInput.trim() && socketRef.current) {
       socketRef.current.emit('send_chat', { text: chatInput });
-      setChatInput('');
-      Keyboard.dismiss();
+      setChatInput(''); Keyboard.dismiss();
     }
   };
 
   const handleVideoChange = () => {
     const bvid = inputBvid.trim();
-    if (bvid) {
-      setVideoBvid(bvid); 
-      if (socketRef.current) socketRef.current.emit('change_video', { bvid: bvid });
-    }
+    if (bvid && socketRef.current) { setVideoBvid(bvid); socketRef.current.emit('change_video', { bvid: bvid }); }
   };
 
   if (!isConnected) {
     return (
       <View style={styles.setupContainer}>
         <StatusBar hidden={true} />
+        {/* ⚠️ 新增：退回主菜单的按钮 */}
+        <TouchableOpacity style={styles.backBtnWrapper} onPress={onBack}>
+          <Ionicons name="arrow-back" size={28} color="#FFF" />
+        </TouchableOpacity>
+
         <Text style={styles.setupTitle}>⚙️ 专属放映室配置</Text>
         <TextInput style={styles.setupInput} placeholder="例如: 服务器IP:3000" placeholderTextColor="#888" value={serverIp} onChangeText={setServerIp} keyboardType="url" autoCapitalize="none" />
         <TouchableOpacity style={styles.setupBtn} onPress={connectToServer}>
-          <Text style={styles.setupBtnText}>保存并连接</Text>
+          <Text style={styles.setupBtnText}>启动链路</Text>
         </TouchableOpacity>
       </View>
     );
@@ -317,18 +305,20 @@ export default function WatchPartyApp() {
           injectedJavaScript={injectedMonitorScript}
           onMessage={onMessage}
           mediaPlaybackRequiresUserAction={false}
-          javaScriptEnabled={true}
-          domStorageEnabled={true} 
-          originWhitelist={['*']} 
-          mixedContentMode="always" 
-          allowsInlineMediaPlayback={true} 
+          javaScriptEnabled={true} domStorageEnabled={true} originWhitelist={['*']} mixedContentMode="always" allowsInlineMediaPlayback={true} 
         />
       </View>
 
       <Animated.View style={[styles.uiOverlay, { opacity: fadeAnim }]} pointerEvents={uiVisible ? 'box-none' : 'none'}>
         <View style={styles.topSection} pointerEvents="box-none">
           <View style={styles.statusBar}>
-            <Text style={styles.roomTitle}>🎬 专属放映室</Text>
+            <View style={{flexDirection:'row', alignItems:'center'}}>
+              {/* ⚠️ 放映室内增加返回主菜单的功能 */}
+              <TouchableOpacity onPress={onBack} style={{marginRight: 10}}>
+                <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
+              <Text style={styles.roomTitle}>🎬 放映室频道</Text>
+            </View>
             <View style={styles.statusBadge}><Text style={styles.statusText}>{syncStatus}</Text></View>
           </View>
           <View style={styles.searchBar}>
@@ -337,35 +327,15 @@ export default function WatchPartyApp() {
           </View>
         </View>
 
-        {/* ⚠️ 核心删减：移除了多余的中央快进按钮区域 */}
-
         <View style={styles.bottomSection} pointerEvents="box-none">
           <View style={styles.sliderPanel}>
             <TouchableOpacity onPress={togglePlayPause} style={styles.playPauseBtn}>
-              {/* ⚠️ 核心UI：直接调用 Expo 内置的 Ionicons 矢量图，彻底还原原生播放器质感 */}
-              <Ionicons 
-                name={isPlaying ? "pause" : "play"} 
-                size={22} 
-                color="#FFF" 
-                style={{ marginLeft: isPlaying ? 0 : 3 }} // 播放三角形几何中心微调
-              />
+              <Ionicons name={isPlaying ? "pause" : "play"} size={22} color="#FFF" style={{ marginLeft: isPlaying ? 0 : 3 }} />
             </TouchableOpacity>
-            
             <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-            <Slider
-              style={styles.slider}
-              minimumValue={0}
-              maximumValue={duration > 0 ? duration : 1}
-              value={currentTime}
-              onSlidingStart={handleSlidingStart}
-              onSlidingComplete={handleSlidingComplete}
-              minimumTrackTintColor="#fb7299"
-              maximumTrackTintColor="rgba(255,255,255,0.3)"
-              thumbTintColor="#fb7299"
-            />
+            <Slider style={styles.slider} minimumValue={0} maximumValue={duration > 0 ? duration : 1} value={currentTime} onSlidingStart={handleSlidingStart} onSlidingComplete={handleSlidingComplete} minimumTrackTintColor="#fb7299" maximumTrackTintColor="rgba(255,255,255,0.3)" thumbTintColor="#fb7299" />
             <Text style={styles.timeText}>{formatTime(duration)}</Text>
           </View>
-
           <View style={styles.chatPanel}>
             <TextInput style={styles.input} placeholder="发条弹幕互动一下..." placeholderTextColor="#CCC" value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendDanmaku} onFocus={clearHideTimer} onBlur={startHideTimer} />
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#00aeec' }]} onPress={sendDanmaku}><Text style={styles.btnText}>发送</Text></TouchableOpacity>
@@ -374,13 +344,42 @@ export default function WatchPartyApp() {
       </Animated.View>
     </KeyboardAvoidingView>
   );
+};
+
+// ==========================================
+// 🚀 根容器: 负责路由状态派发
+// ==========================================
+export default function App() {
+  const [currentRoute, setCurrentRoute] = useState('menu');
+
+  if (currentRoute === 'menu') {
+    return <PSVMenuScreen onNavigate={setCurrentRoute} />;
+  }
+  return <WatchPartyScreen onBack={() => setCurrentRoute('menu')} />;
 }
 
+// ==========================================
+// 🎨 全局样式表
+// ==========================================
 const styles = StyleSheet.create({
+  // --- PSV 菜单样式 ---
+  menuRoot: { flex: 1, backgroundColor: '#0a0a1a', justifyContent: 'center', alignItems: 'center' },
+  bgWave1: { position: 'absolute', width: 800, height: 800, borderRadius: 400, backgroundColor: 'rgba(0, 150, 255, 0.15)', top: -200, left: -200 },
+  bgWave2: { position: 'absolute', width: 600, height: 600, borderRadius: 300, backgroundColor: 'rgba(150, 0, 255, 0.1)', bottom: -150, right: -150 },
+  menuHeader: { position: 'absolute', top: 20, width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 30 },
+  menuTime: { color: '#FFF', fontSize: 16, fontWeight: 'bold', textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 3 },
+  menuIcons: { flexDirection: 'row', alignItems: 'center' },
+  bubbleGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', width: '80%', marginTop: 20, gap: 40 },
+  bubbleContainer: { alignItems: 'center', width: 100 },
+  bubble: { width: 76, height: 76, borderRadius: 38, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 10 },
+  bubbleText: { color: '#FFF', marginTop: 10, fontSize: 13, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
+
+  // --- 放映室样式 ---
+  backBtnWrapper: { position: 'absolute', top: 30, left: 30, zIndex: 10, padding: 10 },
   setupContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', padding: 20 },
   setupTitle: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 30 },
-  setupInput: { width: '100%', backgroundColor: '#222', color: '#FFF', height: 50, borderRadius: 10, paddingHorizontal: 15, fontSize: 16, marginBottom: 20, textAlign: 'center' },
-  setupBtn: { backgroundColor: '#fb7299', width: '100%', height: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
+  setupInput: { width: '80%', maxWidth: 400, backgroundColor: '#222', color: '#FFF', height: 50, borderRadius: 10, paddingHorizontal: 15, fontSize: 16, marginBottom: 20, textAlign: 'center' },
+  setupBtn: { backgroundColor: '#fb7299', width: '80%', maxWidth: 400, height: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
   setupBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   container: { flex: 1, backgroundColor: '#000' },
   videoContainer: { flex: 1 },
@@ -389,13 +388,9 @@ const styles = StyleSheet.create({
   topSection: { gap: 10 },
   statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   searchBar: { flexDirection: 'row', alignItems: 'center' },
-  
   bottomSection: { gap: 15, width: '100%' },
   sliderPanel: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 5 },
-  
-  // ⚠️ 核心UI：去除按钮多余的圆形背景底色，使其直接融入底层磨砂条，贴合 B 站设计语言
   playPauseBtn: { marginRight: 5, justifyContent: 'center', alignItems: 'center', width: 30, height: 30 },
-  
   timeText: { color: '#FFF', fontSize: 12, fontVariant: ['tabular-nums'], width: 45, textAlign: 'center' },
   slider: { flex: 1, height: 40, marginHorizontal: 5 },
   chatPanel: { flexDirection: 'row', alignItems: 'center' },
