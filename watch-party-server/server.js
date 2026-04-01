@@ -8,6 +8,7 @@ const io = new Server(3000, {
 const ROOM_ID = "private_couple_room";
 let currentVideoState = { time: 0, state: 'paused' }; // 缓存当前状态，防朋友掉线
 
+// socket 监听逻辑
 io.on("connection", (socket) => {
   console.log(`用户连入: ${socket.id}`);
   
@@ -26,6 +27,12 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log(`用户断开: ${socket.id}`);
+  });
+
+  socket.on('change_video', (data) => {
+      console.log(`[信令转发] 房间内触发换片，新 BV 号: ${data.bvid}`);
+      // 将换片指令广播给除发送者以外的所有客户端
+      socket.broadcast.emit('change_video', data);
   });
 });
 

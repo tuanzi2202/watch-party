@@ -212,6 +212,21 @@
         setTimeout(() => { isRemoteSyncing = false; }, 1000);
       });
 
+      // ⚠️ 核心新增：接收换片指令并重载 webview
+      socket.on('change_video', (data) => {
+        console.warn(`【探针-PC接收】收到换片指令，新 BV 号: ${data.bvid}`);
+        updateStatus('正在加载新影片...', '#00aeec', '#00aeec');
+        
+        // 重新拼接 B 站播放器 URL 并赋值
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${data.bvid}&high_quality=1&isOutside=true`;
+        
+        // ⚠️ 极其重要的状态重置：清空旧视频的记忆，防止时间线错乱崩溃
+        lastTime = 0;
+        isRemoteSyncing = false;
+        
+        setTimeout(() => { updateStatus('已连接放映室', '#00e676'); }, 2000);
+      });
+
       setInterval(() => {
         if (isRemoteSyncing) return; 
         const queryScript = `

@@ -71,6 +71,23 @@ export default function WatchPartyApp() {
       `;
       webviewRef.current.injectJavaScript(injectScript);
     });
+
+    socket.on('change_video', (data) => {
+      console.log('【探针-APP接收】收到远端换片请求:', data.bvid);
+      setVideoBvid(data.bvid);
+    });
+  };
+
+  // 换片处理函数
+  const handleVideoChange = () => {
+    const bvid = inputBvid.trim();
+    if (bvid) {
+      setVideoBvid(bvid); // 改变本地播放器
+      if (socketRef.current) {
+        socketRef.current.emit('change_video', { bvid: bvid });
+        console.log('【探针-APP发出】向服务器发出换片广播:', bvid);
+      }
+    }
   };
 
   // 注入到 WebView 网页内部的 JavaScript (新增互斥锁与时间差判断)
@@ -240,7 +257,7 @@ export default function WatchPartyApp() {
               value={inputBvid} 
               onChangeText={setInputBvid} 
             />
-            <TouchableOpacity style={styles.actionBtn} onPress={() => { if(inputBvid) setVideoBvid(inputBvid); }}>
+            <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}>
               <Text style={styles.btnText}>换片</Text>
             </TouchableOpacity>
           </View>
