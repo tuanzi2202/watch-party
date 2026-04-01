@@ -258,7 +258,7 @@
     function returnToMenu() {
       if (socket) { socket.disconnect(); socket = null; }
       biliWebview.classList.remove('webview-active');
-      biliWebview.src = 'about:blank'; // 释放底层内存
+      biliWebview.src = 'data:text/html,<html><body></body></html>';
       uiEl.style.opacity = '0';
       chatBar.classList.remove('active');
       
