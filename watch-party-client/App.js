@@ -83,6 +83,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   const [serverIp, setServerIp] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null); 
+  const [roomId, setRoomId] = useState('');
   
   const webviewRef = useRef(null);
   const [syncStatus, setSyncStatus] = useState('连接中...');
@@ -108,13 +109,15 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   const hideTimerRef = useRef(null);
 
   useEffect(() => {
-    const loadSavedIp = async () => {
+    const loadSavedData = async () => {
       try {
         const savedIp = await AsyncStorage.getItem('watchPartyServerIp');
+        const savedRoom = await AsyncStorage.getItem('watchPartyRoomId');
         if (savedIp) setServerIp(savedIp);
+        if (savedRoom) setRoomId(savedRoom);
       } catch (e) {}
     };
-    loadSavedIp();
+    loadSavedData();
     return () => { if (socketRef.current) socketRef.current.disconnect(); clearHideTimer(); };
   }, []);
 
@@ -140,7 +143,11 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
 
   const connectToServer = async () => {
     if (!serverIp.trim()) return Alert.alert('提示', '请输入服务器 IP');
+    const targetRoom = roomId.trim() || 'public_hall';
+    
     await AsyncStorage.setItem('watchPartyServerIp', serverIp.trim());
+    await AsyncStorage.setItem('watchPartyRoomId', targetRoom);
+    
     let url = serverIp.trim();
     if (!url.startsWith('ws://') && !url.startsWith('http://')) url = 'ws://' + url;
 
@@ -150,8 +157,12 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     socketRef.current = socket;
 
     socket.on('connect', () => { 
-      setSyncStatus('已连接好友 🟢'); setIsConnected(true); startHideTimer(); 
-      // ⚠️ 如果是随机进入的，连接成功后立刻强制同步双端
+      // ⚠️ 核心新增：连接成功后立刻加入对应房间
+      socket.emit('join_room', targetRoom);
+      
+      setSyncStatus(`已加入包厢: ${targetRoom} 🟢`); 
+      setIsConnected(true); 
+      startHideTimer(); 
       if (routeParams?.autoRandom) {
         socket.emit('change_video', { bvid: initialBvid });
       }
@@ -305,6 +316,14 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
         </TouchableOpacity>
         <Text style={styles.setupTitle}>⚙️ {routeParams?.autoRandom ? '准备开启盲盒' : '专属放映室配置'}</Text>
         <TextInput style={styles.setupInput} placeholder="例如: 服务器IP:3000" placeholderTextColor="#888" value={serverIp} onChangeText={setServerIp} keyboardType="url" autoCapitalize="none" />
+        <TextInput 
+          style={[styles.setupInput, {marginTop: -5}]} 
+          placeholder="请输入房间口令 (如: 520)" 
+          placeholderTextColor="#888" 
+          value={roomId} 
+          onChangeText={setRoomId} 
+          autoCapitalize="none" 
+        />
         <TouchableOpacity style={styles.setupBtn} onPress={connectToServer}>
           <Text style={styles.setupBtnText}>启动链路</Text>
         </TouchableOpacity>

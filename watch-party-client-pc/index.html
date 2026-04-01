@@ -177,6 +177,7 @@
       <div class="setup-card">
         <h2 id="setup-title">专属放映室</h2>
         <input type="text" id="ip-input" placeholder="请输入信令服务器 IP">
+        <input type="text" id="room-input" placeholder="请输入房间口令 (如: 520)">
         <button onclick="saveAndConnect()">建立连接</button>
       </div>
     </div>
@@ -222,6 +223,7 @@
     const statusEl = document.getElementById('status');
     const statusDot = document.getElementById('status-dot');
     const setupTitle = document.getElementById('setup-title');
+    const roomInput = document.getElementById('room-input');
     let socket;
 
     // --- 随机盲盒数据池 ---
@@ -235,6 +237,7 @@
 
     window.onload = () => { 
       if (localStorage.getItem('watchPartyServerIp')) ipInput.value = localStorage.getItem('watchPartyServerIp'); 
+      if (localStorage.getItem('watchPartyRoomId')) roomInput.value = localStorage.getItem('watchPartyRoomId'); 
     };
 
     // --- 路由切换逻辑 ---
@@ -276,9 +279,12 @@
 
     function saveAndConnect() {
       let ip = ipInput.value.trim();
+      let roomId = roomInput.value.trim() || 'public_hall'; // 默认进入公共大厅
       if (!ip) return;
       if (!ip.startsWith('ws://') && !ip.startsWith('wss://') && !ip.startsWith('http://')) ip = 'ws://' + ip;
-      localStorage.setItem('watchPartyServerIp', ipInput.value.trim()); 
+      
+      localStorage.setItem('watchPartyServerIp', ip); 
+      localStorage.setItem('watchPartyRoomId', roomId); 
       
       setupDialog.style.opacity = '0'; setupDialog.style.pointerEvents = 'none';
       setTimeout(() => {
@@ -287,13 +293,11 @@
         chatBar.classList.add('active');
         biliWebview.classList.add('webview-active');
         
-        // 挂载初始资源
         const targetBvid = isAutoRandom ? RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)] : 'BV1LSXDBiEGG';
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true`;
         
-        initNetwork(ip);
+        initNetwork(ip, roomId); // ⚠️ 将 roomId 传给网络初始化函数
         
-        // 盲盒模式下延迟全网广播
         if (isAutoRandom && socket) {
           setTimeout(() => socket.emit('change_video', { bvid: targetBvid }), 2000);
         }
@@ -332,10 +336,14 @@
       }
     }
 
-    function initNetwork(serverUrl) {
+    function initNetwork(serverUrl, roomId) {
       socket = io(serverUrl, { transports: ['websocket'] });
       
-      socket.on('connect', () => { updateStatus('已连接放映室', '#00e676'); });
+      socket.on('connect', () => { 
+        // ⚠️ 核心新增：向服务器发送加入特定房间的指令
+        socket.emit('join_room', roomId);
+        updateStatus(`已加入包厢: ${roomId}`, '#00e676'); 
+      });
       
       biliWebview.addEventListener('console-message', (e) => {
         if (e.message === 'TOGGLE_UI_PC') { togglePCUI(); } 

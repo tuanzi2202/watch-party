@@ -1,46 +1,43 @@
 const { Server } = require("socket.io");
 
-// 监听 3000 端口，允许跨域
 const io = new Server(3000, {
   cors: { origin: "*" }
 });
 
-const ROOM_ID = "private_couple_room";
-let currentVideoState = { time: 0, state: 'paused' }; // 缓存当前状态，防朋友掉线
+console.log('🚀 多房间同步信令服务器运行在 ws://localhost:3000');
 
-// socket 监听逻辑
-io.on("connection", (socket) => {
-  console.log(`用户连入: ${socket.id}`);
-  
-  // 强制加入唯一的私密房间
-  socket.join(ROOM_ID);
-  
-  // 刚连入时，同步当前房间的视频状态给他
-  socket.emit("sync_receive", currentVideoState);
+io.on('connection', (socket) => {
+    // ⚠️ 核心新增：监听客户端的加入房间请求
+    socket.on('join_room', (roomId) => {
+        socket.join(roomId);
+        socket.roomId = roomId; // 将房间号烙印在这个连接的上下文中
+        console.log(`[房间调度] 节点 ${socket.id} 加入了放映室: [${roomId}]`);
+    });
 
-  // 接收任一端的播放状态更新
-  socket.on("sync_send", (data) => {
-    currentVideoState = data; // 更新服务端缓存
-    // 广播给房间里的【其他人】（不包括发送者自己）
-    socket.to(ROOM_ID).emit("sync_receive", data);
-  });
+    // 以下所有的广播，全部从 io.emit 改为定向的 socket.to(roomId).emit
+    socket.on('sync_send', (data) => {
+        if (socket.roomId) {
+            socket.to(socket.roomId).emit('sync_receive', data);
+        }
+    });
 
-  socket.on("disconnect", () => {
-    console.log(`用户断开: ${socket.id}`);
-  });
+    socket.on('change_video', (data) => {
+        if (socket.roomId) {
+            socket.to(socket.roomId).emit('change_video', data);
+            console.log(`[信令转发] 放映室 [${socket.roomId}] 触发换片: ${data.bvid}`);
+        }
+    });
 
-  socket.on('change_video', (data) => {
-      console.log(`[信令转发] 房间内触发换片，新 BV 号: ${data.bvid}`);
-      // 将换片指令广播给除发送者以外的所有客户端
-      socket.broadcast.emit('change_video', data);
-  });
+    socket.on('send_chat', (data) => {
+        if (socket.roomId) {
+            // 注意弹幕需要用 io.to().emit 以确保发送者自己也能看到动画
+            io.to(socket.roomId).emit('receive_danmaku', data);
+        }
+    });
 
-  // 监听任一端发来的弹幕消息
-  socket.on('send_chat', (data) => {
-      console.log(`[信令转发] 房间内有人发送弹幕: ${data.text}`);
-      // 将弹幕广播给全房间所有人（包括发送者自己，这样自己也能看到特效）
-      io.emit('receive_danmaku', data);
-  });
+    socket.on('disconnect', () => {
+        if (socket.roomId) {
+            console.log(`[断开连接] 节点 ${socket.id} 离开了放映室: [${socket.roomId}]`);
+        }
+    });
 });
-
-console.log("双人同步信令服务器运行在 ws://localhost:3000");
