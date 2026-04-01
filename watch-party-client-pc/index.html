@@ -5,7 +5,6 @@
   <title>专属放映室 (桌面版)</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
-    /* 全局重置与字体设置 */
     :root {
       --bili-pink: #fb7299;
       --bili-pink-hover: #ff85a8;
@@ -21,16 +20,37 @@
       color: var(--text-main);
     }
     
-    /* 视频容器 */
-    webview { width: 100%; height: 100%; border: none; display: none; animation: fadeIn 0.8s ease-out; }
+    /* ⚠️ 核心修复：彻底废弃 display: none，改用视觉隐藏机制 */
+    webview { 
+      position: absolute; 
+      top: 0; 
+      left: 0; 
+      width: 100vw; 
+      height: 100vh; 
+      border: none; 
+      
+      /* 保持物理渲染，但视觉全透明，且鼠标无法点击 */
+      opacity: 0; 
+      pointer-events: none; 
+      z-index: -1; 
+      
+      transition: opacity 0.8s ease-out; 
+    }
     
-    /* === 登录配置面板 (毛玻璃卡片) === */
+    /* 辅助类：用于通过 JS 平滑唤出 webview */
+    .webview-active {
+      opacity: 1;
+      pointer-events: auto;
+      z-index: 1;
+    }
+    
     #setup-dialog { 
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
       display: flex; flex-direction: column; justify-content: center; align-items: center; 
       z-index: 10000;
-      background-image: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2000&auto=format&fit=crop'); /* 优雅的暗色抽象背景 */
+      background-image: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2000&auto=format&fit=crop'); 
       background-size: cover; background-position: center;
+      transition: opacity 0.5s ease, transform 0.5s ease;
     }
     #setup-dialog::before {
       content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -43,14 +63,9 @@
       border-radius: 24px; padding: 40px 50px;
       box-shadow: 0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
       text-align: center;
-      animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .setup-card h2 { 
-      margin: 0 0 10px 0; font-size: 24px; font-weight: 600; letter-spacing: 1px; 
-    }
-    .setup-card p {
-      margin: 0 0 30px 0; color: var(--text-sub); font-size: 14px;
-    }
+    .setup-card h2 { margin: 0 0 10px 0; font-size: 24px; font-weight: 600; letter-spacing: 1px; }
+    .setup-card p { margin: 0 0 30px 0; color: var(--text-sub); font-size: 14px; }
     .input-group { position: relative; margin-bottom: 25px; }
     .setup-card input { 
       width: 280px; padding: 14px 20px; font-size: 15px; 
@@ -79,23 +94,18 @@
     }
     .setup-card button:active { transform: translateY(1px); }
 
-    /* === 播放器状态栏 (胶囊风格) === */
     #ui { 
       position: fixed; top: 25px; left: 25px; 
       background: var(--glass-bg); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
       border: 1px solid var(--glass-border);
       color: #fff; padding: 10px 20px; border-radius: 30px; 
       z-index: 9999; font-size: 14px; font-weight: 500; 
-      pointer-events: none; display: none; 
+      pointer-events: none; opacity: 0;
       box-shadow: 0 8px 20px rgba(0,0,0,0.4);
       display: flex; align-items: center; gap: 8px;
-      transition: opacity 0.3s;
+      transition: opacity 0.5s;
     }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
-    
-    /* 动画定义 */
-    @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   </style>
 </head>
 <body>
@@ -111,7 +121,7 @@
     </div>
   </div>
 
-  <div id="ui" style="display: none;">
+  <div id="ui">
     <div id="status-dot" class="status-dot"></div>
     <span id="status">正在准备连接...</span>
   </div>
@@ -127,7 +137,6 @@
     const statusDot = document.getElementById('status-dot');
     let socket;
 
-    // 状态 UI 更新封装
     function updateStatus(text, color, shadowColor) {
       statusEl.innerText = text;
       statusDot.style.background = color;
@@ -149,14 +158,17 @@
 
       localStorage.setItem('watchPartyServerIp', ipInput.value.trim()); 
       
-      // 平滑淡出配置面板
+      // ⚠️ 核心修复：通过添加 class 与样式，平滑交接图层，彻底避免重新触发布局计算
       setupDialog.style.opacity = '0';
+      setupDialog.style.transform = 'scale(1.05)';
+      setupDialog.style.pointerEvents = 'none';
+      
       setTimeout(() => {
         setupDialog.style.display = 'none';
-        uiEl.style.display = 'flex';
-        biliWebview.style.display = 'block';
+        uiEl.style.opacity = '1';
+        biliWebview.classList.add('webview-active'); // 激活播放器图层
         initNetwork(ip);
-      }, 300); // 等待 CSS 过渡完成
+      }, 500); 
     }
 
     function initNetwork(serverUrl) {
@@ -165,8 +177,6 @@
       
       socket.on('connect', () => { 
         updateStatus('已连接放映室', '#00e676');
-        
-        // 沉浸模式：连接成功后，状态栏展示 3 秒后半透明化，防止遮挡视频
         setTimeout(() => { uiEl.style.opacity = '0.3'; }, 3000);
       });
       socket.on('disconnect', () => { 
@@ -184,7 +194,6 @@
 
       socket.on('sync_receive', (data) => {
         isRemoteSyncing = true;
-        
         const script = `
           (function() {
             var video = document.querySelector('video');
@@ -200,13 +209,11 @@
           })();
         `;
         biliWebview.executeJavaScript(script);
-        
         setTimeout(() => { isRemoteSyncing = false; }, 1000);
       });
 
       setInterval(() => {
         if (isRemoteSyncing) return; 
-
         const queryScript = `
           (function() {
             var video = document.querySelector('video');
@@ -214,13 +221,10 @@
             return { time: video.currentTime, paused: video.paused };
           })();
         `;
-
         biliWebview.executeJavaScript(queryScript).then((result) => {
           if (!result) return;
-          
           const currentTime = result.time;
           const currentState = result.paused ? 'paused' : 'playing';
-
           const timeDiff = currentTime - lastTime;
           const isSeeking = (Math.abs(timeDiff) > 2 && currentState === 'playing') || (Math.abs(timeDiff) > 0.5 && currentState === 'paused');
           const isStateChanged = currentState !== lastState;
@@ -228,7 +232,6 @@
           if (isSeeking || isStateChanged) {
              socket.emit('sync_send', { time: currentTime, state: currentState });
           }
-
           lastTime = currentTime;
           lastState = currentState;
         }).catch(() => {});
