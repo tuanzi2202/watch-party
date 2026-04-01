@@ -219,7 +219,7 @@
     const setupDialog = document.getElementById('setup-dialog');
     const uiEl = document.getElementById('ui');
     const chatBar = document.getElementById('chat-bar');
-    const biliWebview = document.getElementById('bili');
+    let biliWebview = document.getElementById('bili');
     const ipInput = document.getElementById('ip-input');
     const roomInput = document.getElementById('room-input');
     const statusEl = document.getElementById('status');
@@ -260,26 +260,19 @@
 
     // 核心重构：绝对安全的战场清理逻辑
     function returnToMenu() {
-      // 1. 切断网络连接
+      // 1. 切断网络与业务轮询
       if (socket) { socket.disconnect(); socket = null; }
-      
-      // 2. 停止高频轮询，防止内存溢出与 IPC 阻塞
-      if (syncIntervalId) {
-        clearInterval(syncIntervalId);
-        syncIntervalId = null;
-      }
-      
-      // 3. 解绑事件监听，防止 UI 控制重复触发
-      if (consoleMessageHandler) {
-        biliWebview.removeEventListener('console-message', consoleMessageHandler);
-        consoleMessageHandler = null;
-      }
+      if (syncIntervalId) { clearInterval(syncIntervalId); syncIntervalId = null; }
 
-      // 4. 安全销毁视图底层 DOM，使用 Data URI 规避 ERR_ABORTED 报错
-      biliWebview.classList.remove('webview-active');
-      biliWebview.src = 'data:text/html,<html><body></body></html>'; 
-      
-      // 5. 还原 UI 状态并执行平滑退场动画
+      // 2. 物理毁灭：将旧的 webview 连根拔起，附带的所有重复监听器会随之灰飞烟灭
+      biliWebview.remove();
+
+      // 3. 涅槃重生：重新孵化一个新的、绝对干净的 webview 节点挂载到大厅中
+      biliWebview = document.createElement('webview');
+      biliWebview.id = 'bili';
+      wpApp.appendChild(biliWebview);
+
+      // 4. 还原 UI 并平滑退场
       uiEl.style.opacity = '0';
       chatBar.classList.remove('active');
       wpApp.style.display = 'none';
