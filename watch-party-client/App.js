@@ -358,13 +358,21 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
             <View style={styles.statusBadge}><Text style={styles.statusText}>{syncStatus}</Text></View>
           </View>
           <View style={styles.searchBar}>
-            <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
-            <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}><Text style={styles.btnText}>换片</Text></TouchableOpacity>
-            
-            {/* ⚠️ 新增：随机盲盒按钮，点击即可全网同步切到下一个随机视频 */}
-            <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#ff9800', marginLeft: 10, paddingHorizontal: 10}]} onPress={playRandomVideo}>
-              <Ionicons name="dice" size={20} color="#FFF" />
-            </TouchableOpacity>
+            {/* ⚠️ 核心隔离：如果不是盲盒模式，才显示 BV 号输入框和手动换片 */}
+            {!routeParams?.autoRandom ? (
+              <>
+                <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
+                <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}>
+                  <Text style={styles.btnText}>换片</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              /* ⚠️ 核心隔离：如果是盲盒模式，只显示一个宽大醒目的随机抽卡按钮 */
+              <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#ff9800', flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'}]} onPress={playRandomVideo}>
+                <Ionicons name="dice" size={20} color="#FFF" style={{marginRight: 8}} />
+                <Text style={styles.btnText}>换个盲盒视频</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 

@@ -193,9 +193,10 @@
       <ion-icon name="close-circle" style="font-size:24px; margin-right:8px; cursor:pointer;" onclick="returnToMenu()"></ion-icon>
       <div id="status-dot" class="status-dot"></div>
       <span id="status" style="margin-right: 15px;">正在准备连接...</span>
+      
       <input type="text" id="pc-bvid-input" placeholder="输入BV号换片" style="background:rgba(255,255,255,0.2); border:none; color:#fff; border-radius:12px; padding:6px 12px; outline:none; width: 130px;">
-      <button onclick="changeVideoPC()" style="background:#fb7299; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 12px; margin-left:8px; font-weight:bold;">换片</button>
-      <button onclick="playRandomPC()" style="background:#ff9800; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 10px; margin-left:8px; display:flex; align-items:center; justify-content:center;"><ion-icon name="dice" style="font-size:18px;"></ion-icon></button>
+      <button id="pc-change-btn" onclick="changeVideoPC()" style="background:#fb7299; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 12px; margin-left:8px; font-weight:bold;">换片</button>
+      <button id="pc-random-btn" onclick="playRandomPC()" style="background:#ff9800; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 10px; margin-left:8px; display:flex; align-items:center; justify-content:center;"><ion-icon name="dice" style="font-size:18px; margin-right:4px;"></ion-icon> 抽卡</button>
     </div>
     
     <div id="danmaku-container"></div>
@@ -256,6 +257,11 @@
       if (appId === 'watch-party') {
         isAutoRandom = randomFlag;
         setupTitle.innerText = randomFlag ? '准备开启盲盒' : '专属放映室';
+        
+        // ⚠️ 核心修复：根据入口参数，在进入放映室前提前裁切掉不属于该模式的 UI 控件
+        document.getElementById('pc-bvid-input').style.display = randomFlag ? 'none' : 'block';
+        document.getElementById('pc-change-btn').style.display = randomFlag ? 'none' : 'block';
+        document.getElementById('pc-random-btn').style.display = randomFlag ? 'flex' : 'none';
         
         mainMenu.style.opacity = '0';
         mainMenu.style.pointerEvents = 'none';
