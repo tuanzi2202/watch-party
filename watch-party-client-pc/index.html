@@ -99,7 +99,6 @@
       color: white; cursor: pointer; font-weight: 600; font-size: 16px;
     }
 
-    /* 顶部控制面板 */
     #ui { 
       position: fixed; top: 25px; left: 25px; background: var(--glass-bg); backdrop-filter: blur(15px);
       border: 1px solid var(--glass-border); padding: 10px 20px; border-radius: 30px; 
@@ -177,7 +176,7 @@
       <div class="setup-card">
         <h2 id="setup-title">专属放映室</h2>
         <input type="text" id="ip-input" placeholder="请输入信令服务器 IP">
-        <input type="text" id="room-input" placeholder="请输入房间口令 (如: 520)">
+        <input type="text" id="room-input" placeholder="请输入房间口令 (如: 520)" style="margin-top: -10px;">
         <button onclick="saveAndConnect()">建立连接</button>
       </div>
     </div>
@@ -202,6 +201,31 @@
   </div>
 
   <script>
+    // --- 全局句柄与状态管控 (彻底消灭幽灵进程) ---
+    let socket;
+    let syncIntervalId = null; 
+    let consoleMessageHandler = null; 
+    let isAutoRandom = false;
+
+    // --- 盲盒资源池 ---
+    const RANDOM_POOL = [
+      'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
+      'BV1qM4y1w716', 'BV1aA4y1I7vL', 'BV1Q54y1y7eA'
+    ];
+
+    // --- DOM 节点获取 ---
+    const mainMenu = document.getElementById('main-menu');
+    const wpApp = document.getElementById('watch-party-app');
+    const setupDialog = document.getElementById('setup-dialog');
+    const uiEl = document.getElementById('ui');
+    const chatBar = document.getElementById('chat-bar');
+    const biliWebview = document.getElementById('bili');
+    const ipInput = document.getElementById('ip-input');
+    const roomInput = document.getElementById('room-input');
+    const statusEl = document.getElementById('status');
+    const statusDot = document.getElementById('status-dot');
+    const setupTitle = document.getElementById('setup-title');
+
     // --- 时钟更新 ---
     setInterval(() => {
       const now = new Date();
@@ -212,27 +236,6 @@
       document.getElementById('clock').innerText = `${hours}:${minutes} ${ampm}`;
     }, 1000);
 
-    // --- DOM 节点 ---
-    const mainMenu = document.getElementById('main-menu');
-    const wpApp = document.getElementById('watch-party-app');
-    const setupDialog = document.getElementById('setup-dialog');
-    const uiEl = document.getElementById('ui');
-    const chatBar = document.getElementById('chat-bar');
-    const biliWebview = document.getElementById('bili');
-    const ipInput = document.getElementById('ip-input');
-    const statusEl = document.getElementById('status');
-    const statusDot = document.getElementById('status-dot');
-    const setupTitle = document.getElementById('setup-title');
-    const roomInput = document.getElementById('room-input');
-    let socket;
-
-    // --- 随机盲盒数据池 ---
-    const RANDOM_POOL = [
-      'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
-      'BV1qM4y1w716', 'BV1aA4y1I7vL', 'BV1Q54y1y7eA'
-    ];
-    let isAutoRandom = false;
-
     function updateStatus(text, color) { statusEl.innerText = text; statusDot.style.background = color; }
 
     window.onload = () => { 
@@ -240,7 +243,7 @@
       if (localStorage.getItem('watchPartyRoomId')) roomInput.value = localStorage.getItem('watchPartyRoomId'); 
     };
 
-    // --- 路由切换逻辑 ---
+    // --- 路由与生命周期管理 ---
     function openApp(appId, randomFlag) {
       if (appId === 'watch-party') {
         isAutoRandom = randomFlag;
@@ -255,19 +258,35 @@
       }
     }
 
+    // 核心重构：绝对安全的战场清理逻辑
     function returnToMenu() {
+      // 1. 切断网络连接
       if (socket) { socket.disconnect(); socket = null; }
+      
+      // 2. 停止高频轮询，防止内存溢出与 IPC 阻塞
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+        syncIntervalId = null;
+      }
+      
+      // 3. 解绑事件监听，防止 UI 控制重复触发
+      if (consoleMessageHandler) {
+        biliWebview.removeEventListener('console-message', consoleMessageHandler);
+        consoleMessageHandler = null;
+      }
+
+      // 4. 安全销毁视图底层 DOM，使用 Data URI 规避 ERR_ABORTED 报错
       biliWebview.classList.remove('webview-active');
-      biliWebview.src = 'data:text/html,<html><body></body></html>';
+      biliWebview.src = 'data:text/html,<html><body></body></html>'; 
+      
+      // 5. 还原 UI 状态并执行平滑退场动画
       uiEl.style.opacity = '0';
       chatBar.classList.remove('active');
-      
       wpApp.style.display = 'none';
       mainMenu.style.display = 'flex';
       setTimeout(() => mainMenu.style.opacity = '1', 50);
     }
 
-    // --- 放映室业务逻辑 ---
     let pcUiVisible = true;
     function togglePCUI() {
       pcUiVisible = !pcUiVisible;
@@ -279,7 +298,7 @@
 
     function saveAndConnect() {
       let ip = ipInput.value.trim();
-      let roomId = roomInput.value.trim() || 'public_hall'; // 默认进入公共大厅
+      let roomId = roomInput.value.trim() || 'public_hall';
       if (!ip) return;
       if (!ip.startsWith('ws://') && !ip.startsWith('wss://') && !ip.startsWith('http://')) ip = 'ws://' + ip;
       
@@ -296,11 +315,7 @@
         const targetBvid = isAutoRandom ? RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)] : 'BV1LSXDBiEGG';
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true`;
         
-        initNetwork(ip, roomId); // ⚠️ 将 roomId 传给网络初始化函数
-        
-        if (isAutoRandom && socket) {
-          setTimeout(() => socket.emit('change_video', { bvid: targetBvid }), 2000);
-        }
+        initNetwork(ip, roomId);
       }, 500); 
     }
 
@@ -336,19 +351,27 @@
       }
     }
 
+    // --- 核心网络与通信枢纽 ---
     function initNetwork(serverUrl, roomId) {
       socket = io(serverUrl, { transports: ['websocket'] });
       
       socket.on('connect', () => { 
-        // ⚠️ 核心新增：向服务器发送加入特定房间的指令
         socket.emit('join_room', roomId);
         updateStatus(`已加入包厢: ${roomId}`, '#00e676'); 
+        
+        // 消灭网络竞态条件：确保连接建立后才发送随机盲盒同步指令
+        if (isAutoRandom) {
+          const currentBvid = new URL(biliWebview.src).searchParams.get('bvid');
+          if (currentBvid) socket.emit('change_video', { bvid: currentBvid });
+        }
       });
       
-      biliWebview.addEventListener('console-message', (e) => {
+      // 剥离匿名函数，存入全局句柄以备销毁
+      consoleMessageHandler = (e) => {
         if (e.message === 'TOGGLE_UI_PC') { togglePCUI(); } 
         else if (e.message.startsWith('【探针')) { console.log(e.message); }
-      });
+      };
+      biliWebview.addEventListener('console-message', consoleMessageHandler);
 
       let isRemoteSyncing = false;
       let lastTime = 0; let lastState = 'paused';
@@ -359,7 +382,7 @@
         updateStatus('正在换片...', '#00aeec');
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${data.bvid}&high_quality=1&isOutside=true`;
         lastTime = 0; isRemoteSyncing = false;
-        setTimeout(() => updateStatus('已连接放映室', '#00e676'), 2000);
+        setTimeout(() => updateStatus(`已加入包厢: ${roomId}`, '#00e676'), 2000);
       });
 
       socket.on('sync_receive', (data) => {
@@ -376,7 +399,8 @@
         setTimeout(() => { isRemoteSyncing = false; }, 1000);
       });
 
-      setInterval(() => {
+      // 剥离轮询器，存入全局句柄以备销毁
+      syncIntervalId = setInterval(() => {
         if (!socket || isRemoteSyncing) return; 
         
         biliWebview.executeJavaScript(`
