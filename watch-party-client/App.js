@@ -8,12 +8,10 @@ import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function WatchPartyApp() {
-  // === 新增：连接状态与 IP 管理 ===
   const [serverIp, setServerIp] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null); 
   
-  // === 原有状态 ===
   const webviewRef = useRef(null);
   const [syncStatus, setSyncStatus] = useState('连接中...');
   const [videoBvid, setVideoBvid] = useState('BV1LSXDBiEGG');
@@ -22,25 +20,22 @@ export default function WatchPartyApp() {
   const [uiVisible, setUiVisible] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // App 启动时读取本地存储的 IP
   useEffect(() => {
     const loadSavedIp = async () => {
       try {
         const savedIp = await AsyncStorage.getItem('watchPartyServerIp');
-        if (savedIp) setServerIp(savedIp);ip
+        if (savedIp) setServerIp(savedIp);
       } catch (e) {
         console.log('读取 IP 失败', e);
       }
     };
     loadSavedIp();
 
-    // 组件卸载时断开连接
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
   }, []);
 
-  // 执行连接服务器逻辑
   const connectToServer = async () => {
     if (!serverIp.trim()) return Alert.alert('提示', '请输入服务器 IP');
 
@@ -58,29 +53,19 @@ export default function WatchPartyApp() {
 
     socket.on('connect', () => {
       setSyncStatus('已连接好友 🟢');
-      setIsConnected(true); // 连接成功，切入视频界面
+      setIsConnected(true); 
+      console.log('【探针-APP链路】Socket连接成功');
     });
     
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
     
-    socket.on('connect_error', () => {
-      Alert.alert('连接失败', '请检查 IP 地址和端口是否正确，并确保服务器已开启。');
-      socket.disconnect();
-    });
-
+    // 收到远端同步数据，调用 WebView 内部暴露的 executeRemoteSync 函数
     socket.on('sync_receive', (data) => {
+      console.log(`【探针-APP接收】收到服务端下发的进度数据: time=${data.time}, state=${data.state}`);
       if (!webviewRef.current) return;
       const injectScript = `
-        var video = document.querySelector('video');
-        if (video) {
-          if (Math.abs(video.currentTime - ${data.time}) > 1) {
-            video.currentTime = ${data.time};
-          }
-          if ('${data.state}' === 'playing' && video.paused) {
-            video.play();
-          } else if ('${data.state}' === 'paused' && !video.paused) {
-            video.pause();
-          }
+        if(window.executeRemoteSync) {
+          window.executeRemoteSync(${data.time}, '${data.state}');
         }
         true;
       `;
@@ -88,19 +73,61 @@ export default function WatchPartyApp() {
     });
   };
 
+  // 注入到 WebView 网页内部的 JavaScript (新增互斥锁与时间差判断)
   const injectedMonitorScript = `
+    var isRemoteSyncing = false;
+    var lastTime = 0;
+    var lastState = 'paused';
+
+    // 暴露供 RN 调用的远端同步执行函数
+    window.executeRemoteSync = function(time, state) {
+       isRemoteSyncing = true;
+       var video = document.querySelector('video');
+       if (video) {
+         window.ReactNativeWebView.postMessage(JSON.stringify({type: 'LOG', msg: '【探针-Web内】已收到并准备执行同步: ' + time + '秒'}));
+         if (Math.abs(video.currentTime - time) > 1.5) {
+           video.currentTime = time;
+         }
+         if (state === 'playing' && video.paused) {
+           video.play().catch(function(e){});
+         } else if (state === 'paused' && !video.paused) {
+           video.pause();
+         }
+       } else {
+         window.ReactNativeWebView.postMessage(JSON.stringify({type: 'LOG', msg: '【探针-Web内错误】DOM 中找不到视频标签'}));
+       }
+       setTimeout(function(){ isRemoteSyncing = false; }, 1000);
+    };
+
+    // 本地拖动检测轮询
     setInterval(function() {
+      if(isRemoteSyncing) return;
       var video = document.querySelector('video');
       if (video) {
-        var state = video.paused ? 'paused' : 'playing';
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'SYNC_ACTION',
-          time: video.currentTime,
-          state: state
-        }));
-      }
-    }, 1000);
+        var currentTime = video.currentTime;
+        var currentState = video.paused ? 'paused' : 'playing';
+        
+        var timeDiff = currentTime - lastTime;
+        var isSeeking = (Math.abs(timeDiff) > 2 && currentState === 'playing') || (Math.abs(timeDiff) > 0.5 && currentState === 'paused');
+        var isStateChanged = currentState !== lastState;
 
+        if (isSeeking || isStateChanged) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'LOG',
+            msg: '【探针-Web内】检测到主动行为 (拖动/暂停播放)，当前时间: ' + currentTime + 's'
+          }));
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'SYNC_ACTION',
+            time: currentTime,
+            state: currentState
+          }));
+        }
+        lastTime = currentTime;
+        lastState = currentState;
+      }
+    }, 500);
+
+    // 原有的双击唤出UI逻辑
     var tapTimer = null;
     var lastTap = 0;
     window.addEventListener('click', function(e) {
@@ -121,10 +148,15 @@ export default function WatchPartyApp() {
     true;
   `;
 
+  // 统一拦截 WebView 传回的消息
   const onMessage = (event) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === 'SYNC_ACTION' && socketRef.current) {
+      if (msg.type === 'LOG') {
+        // 在 React Native 控制台打印 WebView 里的探针日志
+        console.log(msg.msg); 
+      } else if (msg.type === 'SYNC_ACTION' && socketRef.current) {
+        console.log('【探针-APP发出】向服务器发出 sync_send:', msg.time);
         socketRef.current.emit('sync_send', { time: msg.time, state: msg.state });
       } else if (msg.type === 'TOGGLE_UI') {
         toggleUI();
@@ -151,7 +183,6 @@ export default function WatchPartyApp() {
     }
   };
 
-  // === 界面 1：配置界面 (未连接时显示) ===
   if (!isConnected) {
     return (
       <View style={styles.setupContainer}>
@@ -173,11 +204,9 @@ export default function WatchPartyApp() {
     );
   }
 
-  // === 界面 2：放映室界面 (连接成功后显示) ===
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
       <StatusBar hidden={true} />
-
       <View style={styles.videoContainer}>
         <WebView
           ref={webviewRef}
@@ -192,7 +221,6 @@ export default function WatchPartyApp() {
           originWhitelist={['*']} 
           mixedContentMode="always" 
           allowsInlineMediaPlayback={true} 
-          onError={(e) => console.warn('WebView 加载错误:', e.nativeEvent.description)}
         />
       </View>
 
@@ -237,14 +265,11 @@ export default function WatchPartyApp() {
 }
 
 const styles = StyleSheet.create({
-  // 配置页面样式
   setupContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', padding: 20 },
   setupTitle: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 30 },
   setupInput: { width: '100%', backgroundColor: '#222', color: '#FFF', height: 50, borderRadius: 10, paddingHorizontal: 15, fontSize: 16, marginBottom: 20, textAlign: 'center' },
   setupBtn: { backgroundColor: '#fb7299', width: '100%', height: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
   setupBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  
-  // 原播放器页面样式
   container: { flex: 1, backgroundColor: '#000' },
   videoContainer: { flex: 1 },
   webview: { flex: 1 },

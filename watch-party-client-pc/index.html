@@ -5,94 +5,234 @@
   <title>专属放映室 (桌面版)</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
-    body, html { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+    /* 全局重置与字体设置 */
+    :root {
+      --bili-pink: #fb7299;
+      --bili-pink-hover: #ff85a8;
+      --glass-bg: rgba(25, 25, 30, 0.6);
+      --glass-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f1f1f1;
+      --text-sub: #a0a0b0;
+    }
+    body, html { 
+      margin: 0; padding: 0; height: 100%; overflow: hidden; 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at top right, #1a1a24 0%, #0d0d12 100%);
+      color: var(--text-main);
+    }
     
-    /* 播放器界面 UI */
-    #ui { position: fixed; top: 20px; left: 20px; background: rgba(0,0,0,0.8); color: #fff; padding: 10px 20px; border-radius: 20px; z-index: 9999; font-family: sans-serif; font-weight: bold; pointer-events: none; display: none; }
-    iframe { width: 100%; height: 100%; border: none; display: none; }
+    /* 视频容器 */
+    webview { width: 100%; height: 100%; border: none; display: none; animation: fadeIn 0.8s ease-out; }
     
-    /* 新增：IP 配置界面样式 */
-    #setup-dialog { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10000; color: white; font-family: sans-serif; }
-    #setup-dialog h2 { margin-bottom: 30px; }
-    #setup-dialog input { padding: 15px; font-size: 16px; border-radius: 8px; border: none; margin-bottom: 20px; width: 300px; text-align: center; background: #222; color: #fff; }
-    #setup-dialog button { padding: 12px 40px; font-size: 16px; border-radius: 8px; border: none; background: #fb7299; color: white; cursor: pointer; font-weight: bold; transition: background 0.3s; }
-    #setup-dialog button:hover { background: #e0658a; }
+    /* === 登录配置面板 (毛玻璃卡片) === */
+    #setup-dialog { 
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+      display: flex; flex-direction: column; justify-content: center; align-items: center; 
+      z-index: 10000;
+      background-image: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2000&auto=format&fit=crop'); /* 优雅的暗色抽象背景 */
+      background-size: cover; background-position: center;
+    }
+    #setup-dialog::before {
+      content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); z-index: -1;
+    }
+    .setup-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px; padding: 40px 50px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+      text-align: center;
+      animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .setup-card h2 { 
+      margin: 0 0 10px 0; font-size: 24px; font-weight: 600; letter-spacing: 1px; 
+    }
+    .setup-card p {
+      margin: 0 0 30px 0; color: var(--text-sub); font-size: 14px;
+    }
+    .input-group { position: relative; margin-bottom: 25px; }
+    .setup-card input { 
+      width: 280px; padding: 14px 20px; font-size: 15px; 
+      border-radius: 12px; border: 1px solid var(--glass-border); 
+      background: rgba(0, 0, 0, 0.3); color: #fff; 
+      outline: none; transition: all 0.3s ease;
+      text-align: center; font-family: monospace;
+    }
+    .setup-card input:focus {
+      border-color: var(--bili-pink);
+      box-shadow: 0 0 0 3px rgba(251, 114, 153, 0.2);
+      background: rgba(0, 0, 0, 0.5);
+    }
+    .setup-card input::placeholder { color: #666; font-family: sans-serif; }
+    .setup-card button { 
+      width: 100%; padding: 14px; font-size: 16px; border-radius: 12px; border: none; 
+      background: linear-gradient(135deg, var(--bili-pink), #e05b82); 
+      color: white; cursor: pointer; font-weight: 600; letter-spacing: 1px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(251, 114, 153, 0.3);
+    }
+    .setup-card button:hover { 
+      transform: translateY(-2px); 
+      box-shadow: 0 8px 25px rgba(251, 114, 153, 0.5);
+      background: linear-gradient(135deg, var(--bili-pink-hover), var(--bili-pink)); 
+    }
+    .setup-card button:active { transform: translateY(1px); }
+
+    /* === 播放器状态栏 (胶囊风格) === */
+    #ui { 
+      position: fixed; top: 25px; left: 25px; 
+      background: var(--glass-bg); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
+      border: 1px solid var(--glass-border);
+      color: #fff; padding: 10px 20px; border-radius: 30px; 
+      z-index: 9999; font-size: 14px; font-weight: 500; 
+      pointer-events: none; display: none; 
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      display: flex; align-items: center; gap: 8px;
+      transition: opacity 0.3s;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
+    
+    /* 动画定义 */
+    @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   </style>
 </head>
 <body>
   
   <div id="setup-dialog">
-    <h2>⚙️ 专属放映室配置</h2>
-    <input type="text" id="ip-input" placeholder="例如: 服务器IP:3000">
-    <button onclick="saveAndConnect()">保存并连接</button>
+    <div class="setup-card">
+      <h2>专属放映室</h2>
+      <p>连接私密服务器，开启双人同步观影</p>
+      <div class="input-group">
+        <input type="text" id="ip-input" placeholder="请输入信令服务器 IP (如 192.168.1.5:3000)">
+      </div>
+      <button onclick="saveAndConnect()">建立连接</button>
+    </div>
   </div>
 
-  <div id="ui">🎬 状态: <span id="status" style="color: #ffcc00;">连接中...</span></div>
-  <iframe id="bili" src="https://player.bilibili.com/player.html?bvid=BV1LSXDBiEGG&high_quality=1&isOutside=true"></iframe>
+  <div id="ui" style="display: none;">
+    <div id="status-dot" class="status-dot"></div>
+    <span id="status">正在准备连接...</span>
+  </div>
+  
+  <webview id="bili" src="https://player.bilibili.com/player.html?bvid=BV1LSXDBiEGG&high_quality=1&isOutside=true"></webview>
 
   <script>
     const setupDialog = document.getElementById('setup-dialog');
     const uiEl = document.getElementById('ui');
-    const biliIframe = document.getElementById('bili');
+    const biliWebview = document.getElementById('bili');
     const ipInput = document.getElementById('ip-input');
     const statusEl = document.getElementById('status');
+    const statusDot = document.getElementById('status-dot');
     let socket;
 
-    // 页面启动时读取上次缓存的 IP
+    // 状态 UI 更新封装
+    function updateStatus(text, color, shadowColor) {
+      statusEl.innerText = text;
+      statusDot.style.background = color;
+      statusDot.style.boxShadow = `0 0 10px ${shadowColor || color}`;
+    }
+
     window.onload = () => {
       const savedIp = localStorage.getItem('watchPartyServerIp');
-      if (savedIp) {
-        ipInput.value = savedIp;
-      }
+      if (savedIp) ipInput.value = savedIp;
     };
 
-    // 用户点击连接按钮
     function saveAndConnect() {
       let ip = ipInput.value.trim();
       if (!ip) return alert('请输入服务器 IP！');
       
-      // 自动修正协议前缀
       if (!ip.startsWith('ws://') && !ip.startsWith('wss://') && !ip.startsWith('http://')) {
           ip = 'ws://' + ip;
       }
 
-      // 缓存用户的原始输入
       localStorage.setItem('watchPartyServerIp', ipInput.value.trim()); 
       
-      // 切换 UI
-      setupDialog.style.display = 'none';
-      uiEl.style.display = 'block';
-      biliIframe.style.display = 'block';
-
-      initNetwork(ip);
+      // 平滑淡出配置面板
+      setupDialog.style.opacity = '0';
+      setTimeout(() => {
+        setupDialog.style.display = 'none';
+        uiEl.style.display = 'flex';
+        biliWebview.style.display = 'block';
+        initNetwork(ip);
+      }, 300); // 等待 CSS 过渡完成
     }
 
-    // 初始化网络与播放器通信
     function initNetwork(serverUrl) {
+      updateStatus('正在寻址中...', '#ffcc00');
       socket = io(serverUrl, { transports: ['websocket'] });
       
-      socket.on('connect', () => { statusEl.innerText = '🟢 已连接好友'; statusEl.style.color = '#4CD964'; });
-      socket.on('disconnect', () => { statusEl.innerText = '🔴 已断开'; statusEl.style.color = '#FF3B30'; });
-      socket.on('connect_error', () => { statusEl.innerText = '❌ 连接失败，请刷新修改IP'; statusEl.style.color = '#FF3B30'; });
-
-      biliIframe.onload = function() {
-        const iframeDoc = this.contentDocument || this.contentWindow.document;
+      socket.on('connect', () => { 
+        updateStatus('已连接放映室', '#00e676');
         
-        socket.on('sync_receive', (data) => {
-          const video = iframeDoc.querySelector('video');
-          if(!video) return;
-          if (Math.abs(video.currentTime - data.time) > 1) video.currentTime = data.time;
-          if (data.state === 'playing' && video.paused) video.play();
-          else if (data.state === 'paused' && !video.paused) video.pause();
-        });
+        // 沉浸模式：连接成功后，状态栏展示 3 秒后半透明化，防止遮挡视频
+        setTimeout(() => { uiEl.style.opacity = '0.3'; }, 3000);
+      });
+      socket.on('disconnect', () => { 
+        updateStatus('连接断开', '#ff1744');
+        uiEl.style.opacity = '1'; 
+      });
+      socket.on('connect_error', () => { 
+        updateStatus('连接失败，请检查 IP', '#ff1744');
+        uiEl.style.opacity = '1';
+      });
 
-        setInterval(() => {
-          const video = iframeDoc.querySelector('video');
-          if(video) {
-            socket.emit('sync_send', { time: video.currentTime, state: video.paused ? 'paused' : 'playing' });
+      let isRemoteSyncing = false;
+      let lastTime = 0;
+      let lastState = 'paused';
+
+      socket.on('sync_receive', (data) => {
+        isRemoteSyncing = true;
+        
+        const script = `
+          (function() {
+            var video = document.querySelector('video');
+            if (!video) return;
+            if (Math.abs(video.currentTime - ${data.time}) > 1.5) {
+              video.currentTime = ${data.time};
+            }
+            if ('${data.state}' === 'playing' && video.paused) {
+              video.play().catch(function(){});
+            } else if ('${data.state}' === 'paused' && !video.paused) {
+              video.pause();
+            }
+          })();
+        `;
+        biliWebview.executeJavaScript(script);
+        
+        setTimeout(() => { isRemoteSyncing = false; }, 1000);
+      });
+
+      setInterval(() => {
+        if (isRemoteSyncing) return; 
+
+        const queryScript = `
+          (function() {
+            var video = document.querySelector('video');
+            if (!video) return null;
+            return { time: video.currentTime, paused: video.paused };
+          })();
+        `;
+
+        biliWebview.executeJavaScript(queryScript).then((result) => {
+          if (!result) return;
+          
+          const currentTime = result.time;
+          const currentState = result.paused ? 'paused' : 'playing';
+
+          const timeDiff = currentTime - lastTime;
+          const isSeeking = (Math.abs(timeDiff) > 2 && currentState === 'playing') || (Math.abs(timeDiff) > 0.5 && currentState === 'paused');
+          const isStateChanged = currentState !== lastState;
+
+          if (isSeeking || isStateChanged) {
+             socket.emit('sync_send', { time: currentTime, state: currentState });
           }
-        }, 1000);
-      };
+
+          lastTime = currentTime;
+          lastState = currentState;
+        }).catch(() => {});
+      }, 500);
     }
   </script>
 </body>
