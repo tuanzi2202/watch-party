@@ -1,0 +1,14 @@
+# 忽略所有 Node 模块和日志
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 忽略移动端打包文件或缓存
+.expo/
+dist/
+build/
+
+# 忽略本地环境变量文件（保护你的私钥和配置）
+.env
+.env.local
