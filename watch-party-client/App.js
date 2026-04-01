@@ -382,9 +382,7 @@ export default function App() {
 
     // 2. ⚠️ 核心提权：强行接管 Android 底部导航栏，启动粘性沉浸模式
     if (Platform.OS === 'android') {
-      NavigationBar.setVisibilityAsync("hidden");
-      // overlay-swipe: 用户滑动边缘后短暂唤出，几秒后会自动缩回，不会破坏画面
-      NavigationBar.setBehaviorAsync("overlay-swipe"); 
+      NavigationBar.setVisibilityAsync("hidden"); 
     }
 
     return () => { clearTimeout(timer); clearInterval(interval); };
