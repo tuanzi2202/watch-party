@@ -210,6 +210,21 @@ export default function WatchPartyApp() {
     Keyboard.dismiss();
   };
 
+  const seekVideo = (offsetSeconds) => {
+    if (!webviewRef.current) return;
+    // 直接向 B 站页面空投绝对命令，强制修改当前时间
+    const injectSeekScript = `
+      var video = document.querySelector('video');
+      if (video) {
+        var newTime = Math.max(0, video.currentTime + (${offsetSeconds}));
+        video.currentTime = newTime;
+        // 触发手动修改后，之前的轮询监控会自动捕获这个跃变，并向 PC 端发出同步广播！
+      }
+      true;
+    `;
+    webviewRef.current.injectJavaScript(injectSeekScript);
+  };
+
   const sendDanmaku = () => {
     if (chatInput.trim() && socketRef.current) {
       socketRef.current.emit('send_chat', { text: chatInput });
@@ -281,6 +296,18 @@ export default function WatchPartyApp() {
           </View>
         </View>
 
+        {/* ⚠️ 新增：居中的原生快进快退交互面板 */}
+        <View style={styles.centerSection} pointerEvents="box-none">
+          <TouchableOpacity style={styles.seekCircleBtn} onPress={() => seekVideo(-15)}>
+            <Text style={styles.seekBtnIcon}>⏪</Text>
+            <Text style={styles.seekBtnText}>15s</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.seekCircleBtn} onPress={() => seekVideo(15)}>
+            <Text style={styles.seekBtnIcon}>⏩</Text>
+            <Text style={styles.seekBtnText}>15s</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.bottomSection}>
           <TextInput 
             style={styles.input} 
@@ -319,4 +346,37 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: 'rgba(255,255,255,0.2)', color: '#FFF', height: 40, borderRadius: 20, paddingHorizontal: 15, marginRight: 10 },
   actionBtn: { backgroundColor: '#fb7299', height: 40, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 20 },
   btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+
+  // 在 styles 中追加以下内容
+  centerSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 40,
+  },
+  seekCircleBtn: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+  },
+  seekBtnIcon: {
+    fontSize: 22,
+    color: '#FFF',
+    marginBottom: 2,
+  },
+  seekBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
 });
