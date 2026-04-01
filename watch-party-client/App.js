@@ -6,6 +6,15 @@ import {
 import { WebView } from 'react-native-webview';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Slider from '@react-native-community/slider';
+
+// 时间格式化辅助函数 (将秒数转为 mm:ss)
+const formatTime = (seconds) => {
+  if (isNaN(seconds) || seconds < 0) return '00:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+};
 
 export default function WatchPartyApp() {
   const [serverIp, setServerIp] = useState('');
@@ -20,31 +29,29 @@ export default function WatchPartyApp() {
   const [uiVisible, setUiVisible] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
+  // ⚠️ 新增：原生进度条所需的视频状态管理
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const isSliding = useRef(false); // 拖拽互斥锁（使用 ref 避免引发组件不必要的重渲染）
+
   useEffect(() => {
     const loadSavedIp = async () => {
       try {
         const savedIp = await AsyncStorage.getItem('watchPartyServerIp');
         if (savedIp) setServerIp(savedIp);
-      } catch (e) {
-        console.log('读取 IP 失败', e);
-      }
+      } catch (e) {}
     };
     loadSavedIp();
 
-    return () => {
-      if (socketRef.current) socketRef.current.disconnect();
-    };
+    return () => { if (socketRef.current) socketRef.current.disconnect(); };
   }, []);
 
   const connectToServer = async () => {
     if (!serverIp.trim()) return Alert.alert('提示', '请输入服务器 IP');
-
     await AsyncStorage.setItem('watchPartyServerIp', serverIp.trim());
     
     let url = serverIp.trim();
-    if (!url.startsWith('ws://') && !url.startsWith('http://')) {
-      url = 'ws://' + url;
-    }
+    if (!url.startsWith('ws://') && !url.startsWith('http://')) url = 'ws://' + url;
 
     if (socketRef.current) socketRef.current.disconnect();
 
@@ -54,35 +61,13 @@ export default function WatchPartyApp() {
     socket.on('connect', () => {
       setSyncStatus('已连接好友 🟢');
       setIsConnected(true); 
-      console.log('【探针-APP链路】Socket连接成功');
     });
     
     socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
     
-    // 收到远端同步数据，调用 WebView 内部暴露的 executeRemoteSync 函数
-    socket.on('sync_receive', (data) => {
-      console.log(`【探针-APP接收】收到服务端下发的进度数据: time=${data.time}, state=${data.state}`);
-      if (!webviewRef.current) return;
-      const injectScript = `
-        if(window.executeRemoteSync) {
-          window.executeRemoteSync(${data.time}, '${data.state}');
-        }
-        true;
-      `;
-      webviewRef.current.injectJavaScript(injectScript);
-    });
-
-    socket.on('change_video', (data) => {
-      console.log('【探针-APP接收】收到远端换片请求:', data.bvid);
-      setVideoBvid(data.bvid);
-    });
-  
-    // 接收远端弹幕，并直接注入 JavaScript 在网页内部渲染
+    // 接收远端弹幕
     socket.on('receive_danmaku', (data) => {
-      console.log('【探针-APP接收】渲染弹幕:', data.text);
       if (!webviewRef.current) return;
-      
-      // 动态在网页内部创建一个画板，生成动画弹幕并定时销毁
       const injectDanmakuScript = `
         (function() {
           var container = document.getElementById('custom-rn-danmaku');
@@ -91,7 +76,6 @@ export default function WatchPartyApp() {
               container.id = 'custom-rn-danmaku';
               container.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:999999;overflow:hidden;';
               document.body.appendChild(container);
-              
               var style = document.createElement('style');
               style.innerHTML = '@keyframes danmakuRN { from { transform: translateX(100vw); } to { transform: translateX(-100%); } }';
               document.head.appendChild(style);
@@ -106,21 +90,21 @@ export default function WatchPartyApp() {
       `;
       webviewRef.current.injectJavaScript(injectDanmakuScript);
     });
+
+    socket.on('sync_receive', (data) => {
+      if (!webviewRef.current) return;
+      const injectScript = `
+        if(window.executeRemoteSync) {
+          window.executeRemoteSync(${data.time}, '${data.state}');
+        }
+        true;
+      `;
+      webviewRef.current.injectJavaScript(injectScript);
+    });
+
+    socket.on('change_video', (data) => { setVideoBvid(data.bvid); });
   };
 
-  // 换片处理函数
-  const handleVideoChange = () => {
-    const bvid = inputBvid.trim();
-    if (bvid) {
-      setVideoBvid(bvid); // 改变本地播放器
-      if (socketRef.current) {
-        socketRef.current.emit('change_video', { bvid: bvid });
-        console.log('【探针-APP发出】向服务器发出换片广播:', bvid);
-      }
-    }
-  };
-
-  // 注入到 WebView 网页内部的 JavaScript (新增互斥锁与时间差判断)
   const injectedMonitorScript = `
     var isRemoteSyncing = false;
     var lastTime = 0;
@@ -142,7 +126,16 @@ export default function WatchPartyApp() {
       var video = document.querySelector('video');
       if (video) {
         var currentTime = video.currentTime;
+        var duration = video.duration || 0;
         var currentState = video.paused ? 'paused' : 'playing';
+        
+        // ⚠️ 新增：高频向 RN 发送纯粹的进度更新（用于渲染 Slider）
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'PROGRESS_UPDATE',
+          time: currentTime,
+          duration: duration
+        }));
+
         var timeDiff = currentTime - lastTime;
         var isSeeking = (Math.abs(timeDiff) > 2 && currentState === 'playing') || (Math.abs(timeDiff) > 0.5 && currentState === 'paused');
         var isStateChanged = currentState !== lastState;
@@ -154,44 +147,36 @@ export default function WatchPartyApp() {
       }
     }, 500);
 
-    // ⚠️ 核心提权与拦截机制
     var tapTimer = null;
     var lastTap = 0;
-    
     window.addEventListener('click', function(e) {
-      // 坐标防线：放过屏幕底部 90px 的原生进度条和全屏按钮区域，不予拦截
       if (e.clientY > window.innerHeight - 90) return; 
-
-      // 绝对熔断：切断事件向下传播，B 站原生框架将彻底变成“瞎子”收不到本次点击
       e.stopPropagation(); 
-      
       var now = Date.now();
       if (now - lastTap < 300) {
-        // 双击：触发原生的播放/暂停逻辑
         clearTimeout(tapTimer);
         var video = document.querySelector('video');
         if (video) { video.paused ? video.play() : video.pause(); }
       } else {
-        // 单击：延迟 300ms 确认不是双击后，唤出我们自定义的 UI
         tapTimer = setTimeout(function() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'TOGGLE_UI' }));
         }, 300);
       }
       lastTap = now;
-    }, true); // ⚠️ 注意这个 true：代表在事件向下传递的“捕获阶段”就提前半路打劫
-    
+    }, true); 
     true;
   `;
 
-  // 统一拦截 WebView 传回的消息
   const onMessage = (event) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === 'LOG') {
-        // 在 React Native 控制台打印 WebView 里的探针日志
-        console.log(msg.msg); 
+      if (msg.type === 'PROGRESS_UPDATE') {
+        // ⚠️ 核心锁机制：只有在用户手指没有按在 Slider 上时，才允许底层时间更新 UI
+        if (!isSliding.current) {
+          setCurrentTime(msg.time);
+          setDuration(msg.duration);
+        }
       } else if (msg.type === 'SYNC_ACTION' && socketRef.current) {
-        console.log('【探针-APP发出】向服务器发出 sync_send:', msg.time);
         socketRef.current.emit('sync_send', { time: msg.time, state: msg.state });
       } else if (msg.type === 'TOGGLE_UI') {
         toggleUI();
@@ -199,30 +184,35 @@ export default function WatchPartyApp() {
     } catch (e) {}
   };
 
-  const toggleUI = () => {
-    const toValue = uiVisible ? 0 : 1;
-    Animated.timing(fadeAnim, {
-      toValue,
-      duration: 250,
-      useNativeDriver: true,
-    }).start();
-    setUiVisible(!uiVisible);
-    Keyboard.dismiss();
+  // ⚠️ 新增：处理原生 Slider 拖动事件
+  const handleSlidingStart = () => {
+    isSliding.current = true; // 上锁：屏蔽 WebView 的进度汇报
   };
 
-  const seekVideo = (offsetSeconds) => {
-    if (!webviewRef.current) return;
-    // 直接向 B 站页面空投绝对命令，强制修改当前时间
-    const injectSeekScript = `
-      var video = document.querySelector('video');
-      if (video) {
-        var newTime = Math.max(0, video.currentTime + (${offsetSeconds}));
-        video.currentTime = newTime;
-        // 触发手动修改后，之前的轮询监控会自动捕获这个跃变，并向 PC 端发出同步广播！
-      }
-      true;
-    `;
-    webviewRef.current.injectJavaScript(injectSeekScript);
+  const handleSlidingComplete = (value) => {
+    // 1. 将时间强制注入回 WebView
+    if (webviewRef.current) {
+      webviewRef.current.injectJavaScript(`
+        var video = document.querySelector('video');
+        if (video) { video.currentTime = ${value}; }
+        true;
+      `);
+    }
+    // 2. 向全网广播这一次原生拖拽跳转
+    if (socketRef.current) {
+      socketRef.current.emit('sync_send', { time: value, state: 'playing' });
+    }
+    
+    setCurrentTime(value);
+    // 延迟 500ms 解锁，给网络和底层 DOM 反应时间，防止进度条回弹闪烁
+    setTimeout(() => { isSliding.current = false; }, 500);
+  };
+
+  const toggleUI = () => {
+    const toValue = uiVisible ? 0 : 1;
+    Animated.timing(fadeAnim, { toValue, duration: 250, useNativeDriver: true }).start();
+    setUiVisible(!uiVisible);
+    Keyboard.dismiss();
   };
 
   const sendDanmaku = () => {
@@ -233,20 +223,20 @@ export default function WatchPartyApp() {
     }
   };
 
+  const handleVideoChange = () => {
+    const bvid = inputBvid.trim();
+    if (bvid) {
+      setVideoBvid(bvid); 
+      if (socketRef.current) socketRef.current.emit('change_video', { bvid: bvid });
+    }
+  };
+
   if (!isConnected) {
     return (
       <View style={styles.setupContainer}>
         <StatusBar hidden={true} />
         <Text style={styles.setupTitle}>⚙️ 专属放映室配置</Text>
-        <TextInput
-          style={styles.setupInput}
-          placeholder="例如: 服务器IP:3000"
-          placeholderTextColor="#888"
-          value={serverIp}
-          onChangeText={setServerIp}
-          keyboardType="url"
-          autoCapitalize="none"
-        />
+        <TextInput style={styles.setupInput} placeholder="例如: 服务器IP:3000" placeholderTextColor="#888" value={serverIp} onChangeText={setServerIp} keyboardType="url" autoCapitalize="none" />
         <TouchableOpacity style={styles.setupBtn} onPress={connectToServer}>
           <Text style={styles.setupBtnText}>保存并连接</Text>
         </TouchableOpacity>
@@ -275,51 +265,39 @@ export default function WatchPartyApp() {
       </View>
 
       <Animated.View style={[styles.uiOverlay, { opacity: fadeAnim }]} pointerEvents={uiVisible ? 'box-none' : 'none'}>
-        <View style={styles.topSection}>
+        <View style={styles.topSection} pointerEvents="box-none">
           <View style={styles.statusBar}>
             <Text style={styles.roomTitle}>🎬 专属放映室</Text>
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>{syncStatus}</Text>
-            </View>
+            <View style={styles.statusBadge}><Text style={styles.statusText}>{syncStatus}</Text></View>
           </View>
           <View style={styles.searchBar}>
-            <TextInput 
-              style={styles.input} 
-              placeholder="输入新的 BV号..." 
-              placeholderTextColor="#CCC" 
-              value={inputBvid} 
-              onChangeText={setInputBvid} 
-            />
-            <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}>
-              <Text style={styles.btnText}>换片</Text>
-            </TouchableOpacity>
+            <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} />
+            <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}><Text style={styles.btnText}>换片</Text></TouchableOpacity>
           </View>
         </View>
 
-        {/* ⚠️ 新增：居中的原生快进快退交互面板 */}
-        <View style={styles.centerSection} pointerEvents="box-none">
-          <TouchableOpacity style={styles.seekCircleBtn} onPress={() => seekVideo(-15)}>
-            <Text style={styles.seekBtnIcon}>⏪</Text>
-            <Text style={styles.seekBtnText}>15s</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.seekCircleBtn} onPress={() => seekVideo(15)}>
-            <Text style={styles.seekBtnIcon}>⏩</Text>
-            <Text style={styles.seekBtnText}>15s</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={styles.bottomSection} pointerEvents="box-none">
+          {/* ⚠️ 新增：原生极致丝滑进度轴 */}
+          <View style={styles.sliderPanel}>
+            <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+            <Slider
+              style={styles.slider}
+              minimumValue={0}
+              maximumValue={duration > 0 ? duration : 1}
+              value={currentTime}
+              onSlidingStart={handleSlidingStart}
+              onSlidingComplete={handleSlidingComplete}
+              minimumTrackTintColor="#fb7299"
+              maximumTrackTintColor="rgba(255,255,255,0.3)"
+              thumbTintColor="#fb7299"
+            />
+            <Text style={styles.timeText}>{formatTime(duration)}</Text>
+          </View>
 
-        <View style={styles.bottomSection}>
-          <TextInput 
-            style={styles.input} 
-            placeholder="发条弹幕互动一下..." 
-            placeholderTextColor="#CCC" 
-            value={chatInput} 
-            onChangeText={setChatInput} 
-            onSubmitEditing={sendDanmaku} 
-          />
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#00aeec' }]} onPress={sendDanmaku}>
-            <Text style={styles.btnText}>发送</Text>
-          </TouchableOpacity>
+          <View style={styles.chatPanel}>
+            <TextInput style={styles.input} placeholder="发条弹幕互动一下..." placeholderTextColor="#CCC" value={chatInput} onChangeText={setChatInput} onSubmitEditing={sendDanmaku} />
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#00aeec' }]} onPress={sendDanmaku}><Text style={styles.btnText}>发送</Text></TouchableOpacity>
+          </View>
         </View>
       </Animated.View>
     </KeyboardAvoidingView>
@@ -339,44 +317,18 @@ const styles = StyleSheet.create({
   topSection: { gap: 10 },
   statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   searchBar: { flexDirection: 'row', alignItems: 'center' },
-  bottomSection: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  bottomSection: { gap: 15, width: '100%' },
+  
+  // ⚠️ 新增：原生进度轴样式
+  sliderPanel: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 5 },
+  timeText: { color: '#FFF', fontSize: 12, fontVariant: ['tabular-nums'], width: 45, textAlign: 'center' },
+  slider: { flex: 1, height: 40, marginHorizontal: 5 },
+  
+  chatPanel: { flexDirection: 'row', alignItems: 'center' },
   roomTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
   statusText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
   input: { flex: 1, backgroundColor: 'rgba(255,255,255,0.2)', color: '#FFF', height: 40, borderRadius: 20, paddingHorizontal: 15, marginRight: 10 },
   actionBtn: { backgroundColor: '#fb7299', height: 40, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 20 },
   btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-
-  // 在 styles 中追加以下内容
-  centerSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    alignItems: 'center',
-    width: '100%',
-    paddingHorizontal: 40,
-  },
-  seekCircleBtn: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-  },
-  seekBtnIcon: {
-    fontSize: 22,
-    color: '#FFF',
-    marginBottom: 2,
-  },
-  seekBtnText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
 });
