@@ -63,17 +63,16 @@
     .bubble-text { margin-top: 12px; font-size: 14px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
 
     /* ==========================================
-       🎬 放映室视图配置
+       🎬 放映室视图配置 (彻底弃用 display: none)
        ========================================== */
     #watch-party-app { 
-      /* ⚠️ 核心修复：绝对禁止使用 display: none */
       visibility: hidden; opacity: 0; pointer-events: none; 
       width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; 
       z-index: 100; transition: opacity 0.5s ease;
     }
-    /* 激活状态：恢复可见与交互 */
+    /* ⚠️ 强效激活类：覆盖一切可能残留的隐藏属性 */
     .app-active {
-      visibility: visible; opacity: 1; pointer-events: auto;
+      visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;
     }
     
     webview { 
@@ -210,7 +209,7 @@
   </div>
 
   <script>
-    // --- 全局句柄与状态管控 (彻底消灭幽灵进程) ---
+    // --- 全局句柄与状态管控 ---
     let socket;
     let syncIntervalId = null; 
     let consoleMessageHandler = null; 
@@ -252,18 +251,16 @@
       if (localStorage.getItem('watchPartyRoomId')) roomInput.value = localStorage.getItem('watchPartyRoomId'); 
     };
 
-    // --- 路由与生命周期管理 ---
+    // --- 路由与生命周期管理 (基于透明度而非 display) ---
     function openApp(appId, randomFlag) {
       if (appId === 'watch-party') {
         isAutoRandom = randomFlag;
         setupTitle.innerText = randomFlag ? '准备开启盲盒' : '专属放映室';
         
-        // 隐藏主菜单 (利用透明度和点击穿透)
         mainMenu.style.opacity = '0';
         mainMenu.style.pointerEvents = 'none';
         
         setTimeout(() => {
-          // ⚠️ 核心修复：添加激活类，而非修改 display
           wpApp.classList.add('app-active');
           setupDialog.style.display = 'flex';
           setupDialog.style.opacity = '1';
@@ -272,9 +269,7 @@
       }
     }
 
-    // 核心重构：绝对安全的战场清理逻辑
     function returnToMenu() {
-      // 1. 切断网络与幽灵轮询
       if (socket) { socket.disconnect(); socket = null; }
       if (syncIntervalId) { clearInterval(syncIntervalId); syncIntervalId = null; }
       if (consoleMessageHandler) {
@@ -282,15 +277,12 @@
         consoleMessageHandler = null;
       }
 
-      // 2. 安全释放内存：因为此时并没有 display: none，WebView 是存活的，修改 src 极其安全！
       biliWebview.classList.remove('webview-active');
       biliWebview.src = 'about:blank'; 
       
-      // 3. 隐藏 UI 元素
       uiEl.style.opacity = '0';
       chatBar.classList.remove('active');
       
-      // 4. 隐藏放映室容器，唤醒主菜单
       wpApp.classList.remove('app-active');
       mainMenu.style.pointerEvents = 'auto';
       setTimeout(() => mainMenu.style.opacity = '1', 50);
@@ -360,7 +352,6 @@
       }
     }
 
-    // --- 核心网络与通信枢纽 ---
     function initNetwork(serverUrl, roomId) {
       socket = io(serverUrl, { transports: ['websocket'] });
       
@@ -368,14 +359,12 @@
         socket.emit('join_room', roomId);
         updateStatus(`已加入包厢: ${roomId}`, '#00e676'); 
         
-        // 消灭网络竞态条件：确保连接建立后才发送随机盲盒同步指令
         if (isAutoRandom) {
           const currentBvid = new URL(biliWebview.src).searchParams.get('bvid');
           if (currentBvid) socket.emit('change_video', { bvid: currentBvid });
         }
       });
       
-      // 剥离匿名函数，存入全局句柄以备销毁
       consoleMessageHandler = (e) => {
         if (e.message === 'TOGGLE_UI_PC') { togglePCUI(); } 
         else if (e.message.startsWith('【探针')) { console.log(e.message); }
@@ -408,7 +397,6 @@
         setTimeout(() => { isRemoteSyncing = false; }, 1000);
       });
 
-      // 剥离轮询器，存入全局句柄以备销毁
       syncIntervalId = setInterval(() => {
         if (!socket || isRemoteSyncing) return; 
         
