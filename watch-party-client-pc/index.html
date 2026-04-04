@@ -63,14 +63,13 @@
     .bubble-text { margin-top: 12px; font-size: 14px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
 
     /* ==========================================
-       🎬 放映室视图配置 (彻底弃用 display: none)
+       🎬 放映室视图配置 
        ========================================== */
     #watch-party-app { 
       visibility: hidden; opacity: 0; pointer-events: none; 
       width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; 
       z-index: 100; transition: opacity 0.5s ease;
     }
-    /* ⚠️ 强效激活类：覆盖一切可能残留的隐藏属性 */
     .app-active {
       visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;
     }
@@ -194,7 +193,7 @@
       <div id="status-dot" class="status-dot"></div>
       <span id="status" style="margin-right: 15px;">正在准备连接...</span>
       
-      <input type="text" id="pc-bvid-input" placeholder="输入BV号换片" style="background:rgba(255,255,255,0.2); border:none; color:#fff; border-radius:12px; padding:6px 12px; outline:none; width: 130px;">
+      <input type="text" id="pc-bvid-input" placeholder="可直接粘贴B站分享短链接..." style="background:rgba(255,255,255,0.2); border:none; color:#fff; border-radius:12px; padding:6px 12px; outline:none; width: 190px;">
       <button id="pc-change-btn" onclick="changeVideoPC()" style="background:#fb7299; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 12px; margin-left:8px; font-weight:bold;">换片</button>
       <button id="pc-random-btn" onclick="playRandomPC()" style="background:#ff9800; border:none; color:white; border-radius:12px; cursor:pointer; padding:6px 10px; margin-left:8px; display:flex; align-items:center; justify-content:center;"><ion-icon name="dice" style="font-size:18px; margin-right:4px;"></ion-icon> 抽卡</button>
     </div>
@@ -210,19 +209,17 @@
   </div>
 
   <script>
-    // --- 全局句柄与状态管控 ---
     let socket;
     let syncIntervalId = null; 
     let consoleMessageHandler = null; 
     let isAutoRandom = false;
+    let currentRoomId = ''; // 🚀 新增：记录当前房间号
 
-    // --- 盲盒资源池 ---
     const RANDOM_POOL = [
       'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
       'BV1qM4y1w716', 'BV1aA4y1I7vL', 'BV1Q54y1y7eA'
     ];
 
-    // --- DOM 节点获取 ---
     const mainMenu = document.getElementById('main-menu');
     const wpApp = document.getElementById('watch-party-app');
     const setupDialog = document.getElementById('setup-dialog');
@@ -235,7 +232,6 @@
     const statusDot = document.getElementById('status-dot');
     const setupTitle = document.getElementById('setup-title');
 
-    // --- 时钟更新 ---
     setInterval(() => {
       const now = new Date();
       let hours = now.getHours();
@@ -252,13 +248,11 @@
       if (localStorage.getItem('watchPartyRoomId')) roomInput.value = localStorage.getItem('watchPartyRoomId'); 
     };
 
-    // --- 路由与生命周期管理 (基于透明度而非 display) ---
     function openApp(appId, randomFlag) {
       if (appId === 'watch-party') {
         isAutoRandom = randomFlag;
         setupTitle.innerText = randomFlag ? '准备开启盲盒' : '专属放映室';
         
-        // ⚠️ 核心修复：根据入口参数，在进入放映室前提前裁切掉不属于该模式的 UI 控件
         document.getElementById('pc-bvid-input').style.display = randomFlag ? 'none' : 'block';
         document.getElementById('pc-change-btn').style.display = randomFlag ? 'none' : 'block';
         document.getElementById('pc-random-btn').style.display = randomFlag ? 'flex' : 'none';
@@ -326,11 +320,38 @@
       }, 500); 
     }
 
-    function changeVideoPC() {
-      const bvid = document.getElementById('pc-bvid-input').value.trim();
-      if (bvid && socket) {
-        socket.emit('change_video', { bvid: bvid });
+    // 🚀 核心重构：PC 端同步支持正则提取与短链重定向寻址
+    async function changeVideoPC() {
+      const rawText = document.getElementById('pc-bvid-input').value.trim();
+      if (!rawText) return;
+
+      let targetBvid = null;
+      const bvRegex = /(BV1[A-Za-z0-9]{9})/i;
+
+      const directMatch = rawText.match(bvRegex);
+      if (directMatch) {
+        targetBvid = directMatch[1];
+      } else if (rawText.includes('b23.tv')) {
+        const urlRegex = /(https?:\/\/b23\.tv\/[a-zA-Z0-9]+)/;
+        const urlMatch = rawText.match(urlRegex);
+        if (urlMatch) {
+          try {
+            // Electron 中由于禁用了站源隔离策略，可以直接用 fetch 请求跨域短链并跟随 302 重定向
+            const response = await fetch(urlMatch[1]);
+            const finalUrl = response.url;
+            const finalMatch = finalUrl.match(bvRegex);
+            if (finalMatch) targetBvid = finalMatch[1];
+          } catch (e) {
+            console.warn('解析短链接失败', e);
+          }
+        }
+      }
+
+      if (targetBvid && socket) {
+        socket.emit('change_video', { bvid: targetBvid });
         document.getElementById('pc-bvid-input').value = '';
+      } else {
+        alert('提取失败：未能在输入内容中识别出有效的 BV 号或 B 站分享链接。');
       }
     }
 
@@ -363,12 +384,19 @@
       
       socket.on('connect', () => { 
         socket.emit('join_room', roomId);
-        updateStatus(`已加入包厢: ${roomId}`, '#00e676'); 
+        currentRoomId = roomId;
+        // 先给一个占位符，等待下发真实人数
+        updateStatus(`包厢: ${roomId} (正在获取人数...)`, '#00e676'); 
         
         if (isAutoRandom) {
           const currentBvid = new URL(biliWebview.src).searchParams.get('bvid');
           if (currentBvid) socket.emit('change_video', { bvid: currentBvid });
         }
+      });
+
+      // 🚀 核心新增：接收并渲染房间实时在线人数
+      socket.on('room_count', (count) => {
+        updateStatus(`包厢: ${currentRoomId} (${count}人在线)`, '#00e676');
       });
       
       consoleMessageHandler = (e) => {
@@ -386,7 +414,8 @@
         updateStatus('正在换片...', '#00aeec');
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${data.bvid}&high_quality=1&isOutside=true`;
         lastTime = 0; isRemoteSyncing = false;
-        setTimeout(() => updateStatus(`已加入包厢: ${roomId}`, '#00e676'), 2000);
+        // 这里不要覆盖人数显示，直接使用当前缓存的 roomId 恢复基础显示，稍后服务端如果有人加入会自动下发人数
+        setTimeout(() => updateStatus(`包厢: ${currentRoomId}`, '#00e676'), 2000);
       });
 
       socket.on('sync_receive', (data) => {
