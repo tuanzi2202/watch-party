@@ -111,7 +111,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   const webviewRef = useRef(null);
   const [syncStatus, setSyncStatus] = useState('连接中...');
   
-  const initialBvid = routeParams?.autoRandom ? RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)] : 'BV1LSXDBiEGG';
+  const initialBvid = routeParams?.autoRandom ? RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)] : 'BV162QqBTErx';
   const [videoBvid, setVideoBvid] = useState(initialBvid);
   
   const [inputBvid, setInputBvid] = useState('');
@@ -229,6 +229,20 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
       }
     }, 500);
 
+    // 🚀 新增：暴力破解 B 站移动端 H5 忽略 autoplay 参数的限制
+    var hasForcedAutoplay = false;
+    setInterval(function() {
+      var video = document.querySelector('video');
+      // 如果找到了 video 标签，且还未成功强暴播过，且当前确实是暂停状态
+      if (video && !hasForcedAutoplay && video.paused) {
+         video.play().then(function() { 
+             hasForcedAutoplay = true; // 播放成功，打上标记，停止后续强推
+         }).catch(function(e){
+             // 捕获可能的 DOMException，避免控制台报错刷屏
+         });
+      }
+    }, 300);
+
     var isRemoteSyncing = false;
     var lastTime = 0; var lastState = 'paused';
 
@@ -243,6 +257,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
        setTimeout(function(){ isRemoteSyncing = false; }, 1000);
     };
 
+    // ... 后续的 PROGRESS_UPDATE 轮询和 click 监听事件保持不变 ...
     setInterval(function() {
       if(isRemoteSyncing) return;
       var video = document.querySelector('video');
