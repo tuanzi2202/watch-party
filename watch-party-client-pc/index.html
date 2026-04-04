@@ -320,7 +320,7 @@
       }, 500); 
     }
 
-    // 🚀 核心重构：PC 端同步支持正则提取与短链重定向寻址
+    // 🚀 核心重构：PC 端同步支持正则提取与短链重定向寻址，并修复本地视图不更新的 Bug
     async function changeVideoPC() {
       const rawText = document.getElementById('pc-bvid-input').value.trim();
       if (!rawText) return;
@@ -348,8 +348,15 @@
       }
 
       if (targetBvid && socket) {
+        // 🔥 核心修复：在发出信令的同时，务必先同步修改自己本地的 WebView 地址
+        updateStatus('正在换片...', '#00aeec');
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true`;
+        
         socket.emit('change_video', { bvid: targetBvid });
         document.getElementById('pc-bvid-input').value = '';
+        
+        // 2秒后恢复在线状态 UI
+        setTimeout(() => updateStatus(`包厢: ${currentRoomId}`, '#00e676'), 2000);
       } else {
         alert('提取失败：未能在输入内容中识别出有效的 BV 号或 B 站分享链接。');
       }
@@ -357,7 +364,14 @@
 
     function playRandomPC() {
       const randomId = RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)];
-      if (socket) socket.emit('change_video', { bvid: randomId });
+      if (socket) {
+        // 🔥 核心修复：盲盒抽卡时，同样需要先更新自己的本地视图
+        updateStatus('正在换片...', '#00aeec');
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${randomId}&high_quality=1&isOutside=true`;
+        
+        socket.emit('change_video', { bvid: randomId });
+        setTimeout(() => updateStatus(`包厢: ${currentRoomId}`, '#00e676'), 2000);
+      }
     }
 
     function shootDanmaku(text) {
