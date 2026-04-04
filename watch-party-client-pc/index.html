@@ -314,7 +314,7 @@
         biliWebview.classList.add('webview-active');
         
         const targetBvid = isAutoRandom ? RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)] : 'BV1LSXDBiEGG';
-        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true`;
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true&autoplay=1`;
         
         initNetwork(ip, roomId);
       }, 500); 
@@ -350,7 +350,7 @@
       if (targetBvid && socket) {
         // 🔥 核心修复：在发出信令的同时，务必先同步修改自己本地的 WebView 地址
         updateStatus('正在换片...', '#00aeec');
-        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true`;
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true&autoplay=1`;
         
         socket.emit('change_video', { bvid: targetBvid });
         document.getElementById('pc-bvid-input').value = '';
@@ -367,7 +367,7 @@
       if (socket) {
         // 🔥 核心修复：盲盒抽卡时，同样需要先更新自己的本地视图
         updateStatus('正在换片...', '#00aeec');
-        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${randomId}&high_quality=1&isOutside=true`;
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${randomId}&high_quality=1&isOutside=true&autoplay=1`;
         
         socket.emit('change_video', { bvid: randomId });
         setTimeout(() => updateStatus(`包厢: ${currentRoomId}`, '#00e676'), 2000);
@@ -426,7 +426,7 @@
 
       socket.on('change_video', (data) => {
         updateStatus('正在换片...', '#00aeec');
-        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${data.bvid}&high_quality=1&isOutside=true`;
+        biliWebview.src = `https://player.bilibili.com/player.html?bvid=${data.bvid}&high_quality=1&isOutside=true&autoplay=1`;
         lastTime = 0; isRemoteSyncing = false;
         // 这里不要覆盖人数显示，直接使用当前缓存的 roomId 恢复基础显示，稍后服务端如果有人加入会自动下发人数
         setTimeout(() => updateStatus(`包厢: ${currentRoomId}`, '#00e676'), 2000);

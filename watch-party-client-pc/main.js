@@ -5,8 +5,10 @@ const path = require('path');
 app.commandLine.appendSwitch('disable-site-isolation-trials');
 
 // ⚠️ 新增：强制提高日志过滤级别（0=INFO, 1=WARNING, 2=ERROR, 3=FATAL）
-// 设置为 3 后，底层引擎的这些 P2P 寻址非致命报错将全部被隐藏
 app.commandLine.appendSwitch('log-level', '3'); 
+
+// 🚀 核心新增：彻底解除 Chromium 内核的媒体自动播放限制（允许带声音自动播放）
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 function createWindow () {
   const win = new BrowserWindow({

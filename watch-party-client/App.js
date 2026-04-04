@@ -373,7 +373,8 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
       <View style={styles.videoContainer}>
         <WebView
           ref={webviewRef}
-          source={{ uri: `https://player.bilibili.com/player.html?isOutside=true&bvid=${videoBvid}&high_quality=1` }}
+          // 🚀 核心修改：在 URL 尾部追加 &autoplay=1 参数
+          source={{ uri: `https://player.bilibili.com/player.html?isOutside=true&bvid=${videoBvid}&high_quality=1&autoplay=1` }}
           style={styles.webview}
           userAgent="Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
           injectedJavaScript={injectedMonitorScript}
