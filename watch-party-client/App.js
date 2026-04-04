@@ -477,22 +477,28 @@ export default function App() {
   const [routeParams, setRouteParams] = useState(null);
 
   useEffect(() => {
-    // 🚀 新增：静默检查并应用最新版本
+    // 🚀 新增：静默检查并应用最新版本（附带沙盒环境规避逻辑）
     const triggerOTAUpdate = async () => {
       try {
-        const update = await Updates.checkForUpdateAsync();
-        if (update.isAvailable) {
-          // 发现新版本，开始静默下载
-          await Updates.fetchUpdateAsync();
-          // 下载完毕后，提示用户应用更新 (也可直接调用 reloadAsync 强制重启)
-          Alert.alert(
-            '发现新版本 ✨',
-            '放映室有新的体验升级，已为您准备就绪，是否立即重启应用生效？',
-            [
-              { text: '稍后', style: 'cancel' },
-              { text: '立即更新', onPress: () => Updates.reloadAsync() }
-            ]
-          );
+        // 🔥 核心修复：利用 React Native 提供的 __DEV__ 全局变量
+        // 当处于本地开发模式（包括 Expo Go）时，__DEV__ 为 true，自动跳过更新检查
+        if (!__DEV__) {
+          const update = await Updates.checkForUpdateAsync();
+          if (update.isAvailable) {
+            // 发现新版本，开始静默下载
+            await Updates.fetchUpdateAsync();
+            // 下载完毕后，提示用户应用更新
+            Alert.alert(
+              '发现新版本 ✨',
+              '放映室有新的体验升级，已为您准备就绪，是否立即重启应用生效？',
+              [
+                { text: '稍后', style: 'cancel' },
+                { text: '立即更新', onPress: () => Updates.reloadAsync() }
+              ]
+            );
+          }
+        } else {
+          console.log('当前处于本地开发环境，已自动跳过 OTA 热更新检查。');
         }
       } catch (error) {
         console.warn('OTA 热更新检查失败:', error);
