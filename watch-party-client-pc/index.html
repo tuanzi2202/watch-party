@@ -141,6 +141,21 @@
     #chat-bar button {
       background: #00aeec; border: none; border-radius: 20px; color: white; padding: 8px 20px; cursor: pointer; font-weight: bold;
     }
+
+    /* 🚀 新增：加载遮罩样式 */
+    #loading-overlay {
+      position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: #000; display: flex; flex-direction: column;
+      justify-content: center; align-items: center; z-index: 5000;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+    }
+    #loading-overlay.active { opacity: 1; pointer-events: auto; }
+    .spinner {
+      width: 50px; height: 50px; border: 4px solid rgba(251, 114, 153, 0.2);
+      border-top-color: #fb7299; border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { color: #fb7299; margin-top: 15px; font-size: 16px; font-weight: bold; letter-spacing: 1px; }
   </style>
 </head>
 <body>
@@ -178,6 +193,11 @@
   </div>
 
   <div id="watch-party-app">
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <div class="loading-text">视界链路接通中...</div>
+    </div>
+
     <div id="setup-dialog">
       <ion-icon name="arrow-back-circle" class="back-btn" onclick="returnToMenu()"></ion-icon>
       <div class="setup-card">
@@ -231,6 +251,11 @@
     const statusEl = document.getElementById('status');
     const statusDot = document.getElementById('status-dot');
     const setupTitle = document.getElementById('setup-title');
+
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    function showLoading() { loadingOverlay.classList.add('active'); }
+    function hideLoading() { loadingOverlay.classList.remove('active'); }
 
     setInterval(() => {
       const now = new Date();
@@ -313,7 +338,8 @@
         chatBar.classList.add('active');
         biliWebview.classList.add('webview-active');
         
-        const targetBvid = isAutoRandom ? RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)] : 'BV1LSXDBiEGG';
+        const targetBvid = isAutoRandom ? RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)] : 'BV162QqBTErx';
+        showLoading(); // 🚀 首次进入开启加载
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true&autoplay=1`;
         
         initNetwork(ip, roomId);
@@ -348,6 +374,7 @@
       }
 
       if (targetBvid && socket) {
+        showLoading(); // 🚀 换片时开启加载
         // 🔥 核心修复：在发出信令的同时，务必先同步修改自己本地的 WebView 地址
         updateStatus('正在换片...', '#00aeec');
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${targetBvid}&high_quality=1&isOutside=true&autoplay=1`;
@@ -365,6 +392,7 @@
     function playRandomPC() {
       const randomId = RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)];
       if (socket) {
+        showLoading(); // 🚀 换片时开启加载
         // 🔥 核心修复：盲盒抽卡时，同样需要先更新自己的本地视图
         updateStatus('正在换片...', '#00aeec');
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${randomId}&high_quality=1&isOutside=true&autoplay=1`;
@@ -425,6 +453,7 @@
       socket.on('receive_danmaku', (data) => shootDanmaku(data.text));
 
       socket.on('change_video', (data) => {
+        showLoading(); // 🚀 收到别人换片指令时开启加载
         updateStatus('正在换片...', '#00aeec');
         biliWebview.src = `https://player.bilibili.com/player.html?bvid=${data.bvid}&high_quality=1&isOutside=true&autoplay=1`;
         lastTime = 0; isRemoteSyncing = false;
@@ -480,6 +509,9 @@
           lastTime = result.time; lastState = result.paused ? 'paused' : 'playing';
         }).catch(() => {});
       }, 500);
+
+      // 🚀 最核心的一步：监听 webview 加载完成事件，隐藏动画
+      biliWebview.addEventListener('did-finish-load', hideLoading);
     }
   </script>
 </body>

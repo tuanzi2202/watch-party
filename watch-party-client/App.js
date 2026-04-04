@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, 
-  TextInput, Animated, KeyboardAvoidingView, Platform, Keyboard, Alert, Dimensions
+  TextInput, Animated, KeyboardAvoidingView, Platform, Keyboard, Alert, Dimensions,
+  ActivityIndicator // 🚀 新增引入
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import io from 'socket.io-client';
@@ -116,6 +117,9 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   const [inputBvid, setInputBvid] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [nativeDanmakus, setNativeDanmakus] = useState([]); // 🚀 原生弹幕数据源
+
+  // 2. 在 WatchPartyScreen 组件内部新增 loading 状态
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
   
   const [uiVisible, setUiVisible] = useState(true);
   const uiVisibleRef = useRef(true); 
@@ -210,7 +214,10 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
       webviewRef.current.injectJavaScript(`if(window.executeRemoteSync) { window.executeRemoteSync(${data.time}, '${data.state}'); } true;`);
     });
 
-    socket.on('change_video', (data) => { setVideoBvid(data.bvid); });
+    socket.on('change_video', (data) => { 
+      setIsVideoLoading(true); // 🚀 开启遮罩
+      setVideoBvid(data.bvid); 
+    });
   };
 
   // 保留原有的 WebView 监控脚本 (删除了之前冗余的弹幕 style 注入逻辑)
@@ -336,6 +343,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     }
 
     if (targetBvid && socketRef.current) { 
+      setIsVideoLoading(true); // 🚀 开启遮罩
       setVideoBvid(targetBvid); 
       socketRef.current.emit('change_video', { bvid: targetBvid }); 
       setInputBvid('');
@@ -348,6 +356,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   const playRandomVideo = () => {
     startHideTimer();
     const randomId = RANDOM_BVID_POOL[Math.floor(Math.random() * RANDOM_BVID_POOL.length)];
+    setIsVideoLoading(true); // 🚀 开启遮罩
     setVideoBvid(randomId);
     if (socketRef.current) socketRef.current.emit('change_video', { bvid: randomId });
   };
@@ -380,11 +389,20 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
           injectedJavaScript={injectedMonitorScript}
           onMessage={onMessage}
           mediaPlaybackRequiresUserAction={false} javaScriptEnabled={true} domStorageEnabled={true} originWhitelist={['*']} mixedContentMode="always" allowsInlineMediaPlayback={true} 
+          onLoadEnd={() => setIsVideoLoading(false)} // 🚀 页面框架加载完毕后关闭遮罩
         />
+
+        {/* 🚀 新增：视频黑屏加载遮罩层 */}
+        {isVideoLoading && (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 990 }]}>
+            <ActivityIndicator size="large" color="#fb7299" />
+            <Text style={{ color: '#fb7299', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>视界链路接通中...</Text>
+          </View>
+        )}
         
-        {/* 🚀 新增：置于 WebView 之上的独立原生弹幕画布隔离层 */}
+        {/* 原本的独立原生弹幕画布隔离层 */}
         <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none', overflow: 'hidden', zIndex: 998 }]}>
-          {nativeDanmakus.map(d => <DanmakuItem key={d.id} text={d.text} topOffset={d.topOffset} />)}
+            {nativeDanmakus.map(d => <DanmakuItem key={d.id} text={d.text} topOffset={d.topOffset} />)}
         </View>
       </View>
 
