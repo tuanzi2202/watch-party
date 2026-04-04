@@ -6,15 +6,22 @@ const io = new Server(3000, {
 
 console.log('🚀 多房间同步信令服务器运行在 ws://localhost:3000');
 
+// 辅助函数：广播指定房间的实时人数
+const broadcastRoomCount = (roomId) => {
+    const room = io.sockets.adapter.rooms.get(roomId);
+    const count = room ? room.size : 0;
+    io.to(roomId).emit('room_count', count);
+};
+
 io.on('connection', (socket) => {
-    // ⚠️ 核心新增：监听客户端的加入房间请求
     socket.on('join_room', (roomId) => {
         socket.join(roomId);
-        socket.roomId = roomId; // 将房间号烙印在这个连接的上下文中
+        socket.roomId = roomId;
         console.log(`[房间调度] 节点 ${socket.id} 加入了放映室: [${roomId}]`);
+        // 触发人数广播更新
+        broadcastRoomCount(roomId);
     });
 
-    // 以下所有的广播，全部从 io.emit 改为定向的 socket.to(roomId).emit
     socket.on('sync_send', (data) => {
         if (socket.roomId) {
             socket.to(socket.roomId).emit('sync_receive', data);
@@ -30,7 +37,6 @@ io.on('connection', (socket) => {
 
     socket.on('send_chat', (data) => {
         if (socket.roomId) {
-            // 注意弹幕需要用 io.to().emit 以确保发送者自己也能看到动画
             io.to(socket.roomId).emit('receive_danmaku', data);
         }
     });
@@ -38,6 +44,8 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         if (socket.roomId) {
             console.log(`[断开连接] 节点 ${socket.id} 离开了放映室: [${socket.roomId}]`);
+            // 稍作延迟确保当前 socket 已脱离 room 队列，获取最新人数
+            setTimeout(() => { broadcastRoomCount(socket.roomId); }, 100);
         }
     });
 });

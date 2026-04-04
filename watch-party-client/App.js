@@ -8,11 +8,11 @@ import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
-// ⚠️ 核心新增：引入 Expo 官方安卓导航栏底座强控模块
 import * as NavigationBar from 'expo-navigation-bar'; 
-// ⚠️ 核心修复 1：使用 Expo 官方的高级状态栏组件，替代 React Native 原生的脆弱组件
 import { StatusBar } from 'expo-status-bar';
-import { StatusBar as RNStatusBar } from 'react-native'; // 保留原生 API 用于指令式强控
+import { StatusBar as RNStatusBar } from 'react-native'; 
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const RANDOM_BVID_POOL = [
   'BV1LSXDBiEGG', 'BV1GJ411x7h7', 'BV1xx411c7mD', 'BV17x411w7KC', 
@@ -27,7 +27,31 @@ const formatTime = (seconds) => {
 };
 
 // ==========================================
-// 🎮 视界 1: PSV 风格主菜单组件
+// 🚀 新增：原生 RN 弹幕独立渲染组件
+// ==========================================
+const DanmakuItem = ({ text, topOffset }) => {
+  const translateX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+  
+  useEffect(() => {
+    Animated.timing(translateX, {
+      toValue: -SCREEN_WIDTH, // 从屏幕右侧滑动至左侧彻底消失
+      duration: 6000,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  return (
+    <Animated.View style={{ 
+      position: 'absolute', top: `${topOffset}%`, 
+      transform: [{ translateX }], zIndex: 9999 
+    }}>
+      <Text style={styles.danmakuText}>{text}</Text>
+    </Animated.View>
+  );
+};
+
+// ==========================================
+// 🎮 视界 1: PSV 风格主菜单组件 (无变动)
 // ==========================================
 const PSVMenuScreen = ({ onNavigate }) => {
   const breathAnim = useRef(new Animated.Value(1)).current;
@@ -80,8 +104,9 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   const [serverIp, setServerIp] = useState('');
   const [roomId, setRoomId] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-  const socketRef = useRef(null); 
+  const [roomCount, setRoomCount] = useState(1); // 🚀 新增人数状态
   
+  const socketRef = useRef(null); 
   const webviewRef = useRef(null);
   const [syncStatus, setSyncStatus] = useState('连接中...');
   
@@ -90,6 +115,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
   
   const [inputBvid, setInputBvid] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [nativeDanmakus, setNativeDanmakus] = useState([]); // 🚀 原生弹幕数据源
   
   const [uiVisible, setUiVisible] = useState(true);
   const uiVisibleRef = useRef(true); 
@@ -152,37 +178,31 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
 
     socket.on('connect', () => { 
       socket.emit('join_room', targetRoom);
-      setSyncStatus(`已加入包厢: ${targetRoom} 🟢`); 
+      setSyncStatus(`包厢: ${targetRoom} 🟢`); 
       setIsConnected(true); 
       startHideTimer(); 
       if (routeParams?.autoRandom) socket.emit('change_video', { bvid: initialBvid });
     });
     
-    socket.on('disconnect', () => setSyncStatus('已断开连接 🔴'));
+    socket.on('disconnect', () => setSyncStatus('连接断开 🔴'));
     
+    // 🚀 监听人数变化
+    socket.on('room_count', (count) => {
+      setRoomCount(count);
+    });
+
     socket.on('receive_danmaku', (data) => {
-      if (!webviewRef.current) return;
-      const injectDanmakuScript = `
-        (function() {
-          var container = document.getElementById('custom-rn-danmaku');
-          if(!container) {
-              container = document.createElement('div');
-              container.id = 'custom-rn-danmaku';
-              container.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:999999;overflow:hidden;';
-              document.body.appendChild(container);
-              var style = document.createElement('style');
-              style.innerHTML = '@keyframes danmakuRN { from { transform: translateX(100vw); } to { transform: translateX(-100%); } }';
-              document.head.appendChild(style);
-          }
-          var el = document.createElement('div');
-          el.innerText = '${data.text}';
-          el.style.cssText = 'position:absolute;white-space:nowrap;color:#fff;font-size:20px;font-weight:bold;text-shadow:1px 1px 2px #000;animation:danmakuRN 5s linear forwards;top:' + (Math.random()*50+10) + '%;';
-          container.appendChild(el);
-          setTimeout(function() { el.remove(); }, 5000);
-        })();
-        true;
-      `;
-      webviewRef.current.injectJavaScript(injectDanmakuScript);
+      // 🚀 核心修复：彻底抛弃 WebView 注入，改用 React Native 原生层叠渲染
+      const newDmk = { 
+        id: Date.now().toString() + Math.random(), 
+        text: data.text, 
+        topOffset: Math.random() * 40 + 5 // 限制在屏幕上方 5% ~ 45% 的高度范围内
+      };
+      setNativeDanmakus(prev => [...prev, newDmk]);
+      // 6秒后自动清理
+      setTimeout(() => {
+        setNativeDanmakus(prev => prev.filter(d => d.id !== newDmk.id));
+      }, 6000);
     });
 
     socket.on('sync_receive', (data) => {
@@ -193,6 +213,7 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     socket.on('change_video', (data) => { setVideoBvid(data.bvid); });
   };
 
+  // 保留原有的 WebView 监控脚本 (删除了之前冗余的弹幕 style 注入逻辑)
   const injectedMonitorScript = `
     setInterval(function() {
       var video = document.querySelector('video');
@@ -284,9 +305,44 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     }
   };
 
-  const handleVideoChange = () => {
-    const bvid = inputBvid.trim();
-    if (bvid && socketRef.current) { setVideoBvid(bvid); socketRef.current.emit('change_video', { bvid: bvid }); }
+  // 🚀 核心重构：支持正则提取 BV 号与 Fetch 追踪 b23.tv 短链接重定向
+  const handleVideoChange = async () => {
+    const rawText = inputBvid.trim();
+    if (!rawText) return;
+
+    let targetBvid = null;
+    const bvRegex = /(BV1[A-Za-z0-9]{9})/i;
+    
+    // 场景 1：输入内容本身包含 BV 号（直通车或常规 B 站 Web 链接）
+    const directMatch = rawText.match(bvRegex);
+    if (directMatch) {
+      targetBvid = directMatch[1];
+    } 
+    // 场景 2：输入的是 B 站 App 复制的分享文案，含有 b23.tv 短链接
+    else if (rawText.includes('b23.tv')) {
+      const urlRegex = /(https?:\/\/b23\.tv\/[a-zA-Z0-9]+)/;
+      const urlMatch = rawText.match(urlRegex);
+      if (urlMatch) {
+        try {
+          // 利用 RN 原生 Fetch 无视跨域的特性，直接请求短链，跟随 302 重定向
+          const response = await fetch(urlMatch[1]);
+          const finalUrl = response.url;
+          const finalMatch = finalUrl.match(bvRegex);
+          if (finalMatch) targetBvid = finalMatch[1];
+        } catch (e) {
+          console.warn('解析分享链接失败', e);
+        }
+      }
+    }
+
+    if (targetBvid && socketRef.current) { 
+      setVideoBvid(targetBvid); 
+      socketRef.current.emit('change_video', { bvid: targetBvid }); 
+      setInputBvid('');
+      Keyboard.dismiss();
+    } else {
+      Alert.alert('提取失败', '未能在输入内容中识别出有效的 BV 号或 B 站分享链接。');
+    }
   };
 
   const playRandomVideo = () => {
@@ -324,6 +380,11 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
           onMessage={onMessage}
           mediaPlaybackRequiresUserAction={false} javaScriptEnabled={true} domStorageEnabled={true} originWhitelist={['*']} mixedContentMode="always" allowsInlineMediaPlayback={true} 
         />
+        
+        {/* 🚀 新增：置于 WebView 之上的独立原生弹幕画布隔离层 */}
+        <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none', overflow: 'hidden', zIndex: 998 }]}>
+          {nativeDanmakus.map(d => <DanmakuItem key={d.id} text={d.text} topOffset={d.topOffset} />)}
+        </View>
       </View>
 
       <Animated.View style={[styles.uiOverlay, { opacity: fadeAnim }]} pointerEvents={uiVisible ? 'box-none' : 'none'}>
@@ -333,14 +394,15 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
               <TouchableOpacity onPress={onBack} style={{marginRight: 10}}>
                 <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.7)" />
               </TouchableOpacity>
-              <Text style={styles.roomTitle}>🎬 放映室频道</Text>
+              {/* 🚀 UI更新：实时展示房间人数 */}
+              <Text style={styles.roomTitle}>🎬 放映室频道 ({roomCount}人)</Text>
             </View>
             <View style={styles.statusBadge}><Text style={styles.statusText}>{syncStatus}</Text></View>
           </View>
           <View style={styles.searchBar}>
             {!routeParams?.autoRandom ? (
               <>
-                <TextInput style={styles.input} placeholder="输入新的 BV号..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
+                <TextInput style={styles.input} placeholder="可直接粘贴B站分享短链接..." placeholderTextColor="#CCC" value={inputBvid} onChangeText={setInputBvid} onFocus={clearHideTimer} onBlur={startHideTimer} />
                 <TouchableOpacity style={styles.actionBtn} onPress={handleVideoChange}><Text style={styles.btnText}>换片</Text></TouchableOpacity>
               </>
             ) : (
@@ -380,7 +442,6 @@ export default function App() {
 
   useEffect(() => {
     const enforceImmersiveMode = async () => {
-      // ⚠️ 核心修复 2：防弹衣逻辑。即使 NavigationBar 崩溃，也绝不牵连 StatusBar
       try {
         if (Platform.OS === 'android') {
           await NavigationBar.setVisibilityAsync("hidden");
@@ -388,7 +449,6 @@ export default function App() {
       } catch (error) {
         console.warn("底部导航栏隐藏指令被系统拦截，但这不影响状态栏隐藏:", error.message);
       } finally {
-        // Finally 块中的代码拥有最高执行特权，必定会运行！
         RNStatusBar.setHidden(true, 'none');
       }
     };
@@ -404,7 +464,6 @@ export default function App() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
-      {/* ⚠️ 核心修复 3：使用 Expo 官方组件兜底。即使指令式 API 失效，声明式属性也能强制隐身 */}
       <StatusBar hidden={true} style="light" backgroundColor="transparent" translucent={true} />
       
       {currentRoute === 'menu' ? (
@@ -417,6 +476,8 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  // 🚀 新增原生弹幕文本样式
+  danmakuText: { color: '#FFF', fontSize: 22, fontWeight: 'bold', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 3, paddingHorizontal: 10 },
   menuRoot: { flex: 1, backgroundColor: '#0a0a1a', justifyContent: 'center', alignItems: 'center' },
   bgWave1: { position: 'absolute', width: 800, height: 800, borderRadius: 400, backgroundColor: 'rgba(0, 150, 255, 0.15)', top: -200, left: -200 },
   bgWave2: { position: 'absolute', width: 600, height: 600, borderRadius: 300, backgroundColor: 'rgba(150, 0, 255, 0.1)', bottom: -150, right: -150 },
@@ -427,7 +488,6 @@ const styles = StyleSheet.create({
   bubbleContainer: { alignItems: 'center', width: 100 },
   bubble: { width: 76, height: 76, borderRadius: 38, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 10 },
   bubbleText: { color: '#FFF', marginTop: 10, fontSize: 13, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
-
   backBtnWrapper: { position: 'absolute', top: 30, left: 30, zIndex: 10, padding: 10 },
   setupContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', padding: 20 },
   setupTitle: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 30 },
