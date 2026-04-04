@@ -12,6 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as NavigationBar from 'expo-navigation-bar'; 
 import { StatusBar } from 'expo-status-bar';
 import { StatusBar as RNStatusBar } from 'react-native'; 
+// 🚀 新增：引入 Expo 热更新模块
+import * as Updates from 'expo-updates';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -35,7 +37,7 @@ const DanmakuItem = ({ text, topOffset }) => {
   
   useEffect(() => {
     Animated.timing(translateX, {
-      toValue: -SCREEN_WIDTH, // 从屏幕右侧滑动至左侧彻底消失
+      toValue: -SCREEN_WIDTH, 
       duration: 6000,
       useNativeDriver: true,
     }).start();
@@ -196,14 +198,14 @@ const WatchPartyScreen = ({ onBack, routeParams }) => {
     });
 
     socket.on('receive_danmaku', (data) => {
-      // 🚀 核心修复：彻底抛弃 WebView 注入，改用 React Native 原生层叠渲染
       const newDmk = { 
         id: Date.now().toString() + Math.random(), 
         text: data.text, 
-        topOffset: Math.random() * 40 + 5 // 限制在屏幕上方 5% ~ 45% 的高度范围内
+        // 🚀 UI 修复 1：将随机高度从 5%~45% 压缩至 2%~25%
+        // 横屏状态下，屏幕上半部约 40% 的区域是绝对安全的，即便弹出键盘也绝对不会挡住
+        topOffset: Math.random() * 23 + 2 
       };
       setNativeDanmakus(prev => [...prev, newDmk]);
-      // 6秒后自动清理
       setTimeout(() => {
         setNativeDanmakus(prev => prev.filter(d => d.id !== newDmk.id));
       }, 6000);
@@ -475,6 +477,31 @@ export default function App() {
   const [routeParams, setRouteParams] = useState(null);
 
   useEffect(() => {
+    // 🚀 新增：静默检查并应用最新版本
+    const triggerOTAUpdate = async () => {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          // 发现新版本，开始静默下载
+          await Updates.fetchUpdateAsync();
+          // 下载完毕后，提示用户应用更新 (也可直接调用 reloadAsync 强制重启)
+          Alert.alert(
+            '发现新版本 ✨',
+            '放映室有新的体验升级，已为您准备就绪，是否立即重启应用生效？',
+            [
+              { text: '稍后', style: 'cancel' },
+              { text: '立即更新', onPress: () => Updates.reloadAsync() }
+            ]
+          );
+        }
+      } catch (error) {
+        console.warn('OTA 热更新检查失败:', error);
+      }
+    };
+
+    // 每次启动 App 时触发检查
+    triggerOTAUpdate();
+
     const enforceImmersiveMode = async () => {
       try {
         if (Platform.OS === 'android') {
@@ -488,13 +515,9 @@ export default function App() {
     };
 
     enforceImmersiveMode();
-
-    const interval = setInterval(() => {
-      RNStatusBar.setHidden(true, 'none');
-    }, 2000); 
-
+    const interval = setInterval(() => { RNStatusBar.setHidden(true, 'none'); }, 2000); 
     return () => clearInterval(interval);
-  }, [currentRoute]); 
+  }, [currentRoute]);
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
@@ -544,7 +567,23 @@ const styles = StyleSheet.create({
   roomTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
   statusText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  input: { flex: 1, backgroundColor: 'rgba(255,255,255,0.2)', color: '#FFF', height: 40, borderRadius: 20, paddingHorizontal: 15, marginRight: 10 },
-  actionBtn: { backgroundColor: '#fb7299', height: 40, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 20 },
-  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+  // 🚀 UI 修复 2：全面压缩输入框和按钮的尺寸，释放横屏纵向空间
+  input: { 
+    flex: 1, 
+    backgroundColor: 'rgba(255,255,255,0.2)', 
+    color: '#FFF', 
+    height: 32, // 📉 从 40 缩小至 32
+    borderRadius: 16, // 圆角适配
+    paddingHorizontal: 15, 
+    marginRight: 10,
+    fontSize: 13, // 字体略微调小
+  },
+  actionBtn: { 
+    backgroundColor: '#fb7299', 
+    height: 32, // 📉 从 40 缩小至 32
+    justifyContent: 'center', 
+    paddingHorizontal: 15, 
+    borderRadius: 16 
+  },
+  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
 });
